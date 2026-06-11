@@ -4,7 +4,8 @@ import React, { useState, useEffect } from "react";
 import { 
   Search, Plus, Download, X, Briefcase, Award, DollarSign, Calendar, 
   BarChart3, CheckCircle, AlertCircle, Clock, PieChart as PieIcon, 
-  UserCheck, RefreshCw, Layers, ShieldAlert, ArrowRight, UserPlus
+  UserCheck, RefreshCw, Layers, ShieldAlert, ArrowRight, UserPlus,
+  Eye, Sparkles, ChevronDown, User
 } from "lucide-react";
 import { StatusChip } from "@/components/status-chip";
 import { ProgressBar } from "@/components/progress-bar";
@@ -310,18 +311,24 @@ export default function ResourceModule() {
   const [empName, setEmpName] = useState("");
   const [empEmail, setEmpEmail] = useState("");
   const [empPhone, setEmpPhone] = useState("");
-  const [empDesignation, setEmpDesignation] = useState("");
+  const [empDesignation, setEmpDesignation] = useState("Other Cloud Service");
   const [empDept, setEmpDept] = useState("Engineering");
-  const [empManager, setEmpManager] = useState("");
+  const [empManager, setEmpManager] = useState("Yogesh V");
   const [empLocation, setEmpLocation] = useState("");
   const [empType, setEmpType] = useState<Resource['employmentType']>("Full Time");
   
-  const [empCostRate, setEmpCostRate] = useState("80");
-  const [empBillingRate, setEmpBillingRate] = useState("150");
+  const [empCostRate, setEmpCostRate] = useState("0.1");
+  const [empBillingRate, setEmpBillingRate] = useState("40");
   const [empCurrency, setEmpCurrency] = useState("USD");
-  const [empJoinDate, setEmpJoinDate] = useState("");
+  const [empJoinDate, setEmpJoinDate] = useState("2026-06-17");
   const [empExperience, setEmpExperience] = useState("5");
   const [empAvailability, setEmpAvailability] = useState("40");
+
+  const [empCategory, setEmpCategory] = useState("VM");
+  const [empProjectAssignment, setEmpProjectAssignment] = useState("UVANTHU");
+  const [empDescription, setEmpDescription] = useState("");
+  const [empStatus, setEmpStatus] = useState("Available");
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const [formSkills, setFormSkills] = useState<{ name: string; level: Skill['level']; yearsExp: number; certification?: string }[]>([
     { name: "React", level: "Advanced", yearsExp: 3 }
@@ -482,34 +489,89 @@ export default function ResourceModule() {
     setFormSkills(formSkills.filter((_, i) => i !== idx));
   };
 
+  const handleVerifyWithAI = async () => {
+    if (!empName) {
+      toast.error("Please enter a resource name first.");
+      return;
+    }
+    setIsVerifying(true);
+    try {
+      const res = await fetch("/api/gemini/validate-resource", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resourceName: empName })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.isValid) {
+          setEmpName(data.correctedName);
+          setEmpCostRate(String(data.suggestedCost));
+          setEmpCategory(data.category || "VM");
+          setEmpDesignation(data.correctedName);
+          toast.success(data.message || "Resource verified successfully!");
+        } else {
+          toast.error(data.message || "Invalid or unrecognized cloud service.");
+        }
+      } else {
+        toast.error("AI verification failed. Please check your network or API settings.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("An error occurred during verification.");
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   // Save new Resource
   const handleSaveResource = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!empName || !empEmail || !empDesignation) {
+    if (!empName || !empDesignation) {
       toast.error("Please complete basic details.");
       return;
     }
 
+    const generatedEmail = empEmail || `${empName.toLowerCase().trim().replace(/[^a-zA-Z0-9]+/g, ".")}@nexusflow.com`;
+    const generatedId = empId || `EMP-${Date.now().toString().slice(-4)}`;
+
+    // If project is assigned, create an allocation
+    const allocationsList: Allocation[] = [];
+    let initialUtil = 0;
+    if (empProjectAssignment) {
+      allocationsList.push({
+        id: `AL-${Date.now()}`,
+        projectId: `PRJ-${Math.floor(1000 + Math.random() * 9000)}`,
+        projectName: empProjectAssignment,
+        role: "Resource",
+        allocationPercent: 100,
+        startDate: empJoinDate || new Date().toISOString().split("T")[0],
+        endDate: "2026-12-31",
+        isBillable: true,
+        remarks: "Provisioned allocation"
+      });
+      initialUtil = 100;
+    }
+
     const newResource: Resource = {
-      id: empId || `EMP-${200 + resources.length + 1}`,
+      id: generatedId,
       name: empName,
-      email: empEmail,
-      phone: empPhone || "+1 (555) 000-0000",
+      email: generatedEmail,
+      phone: empPhone || "N/A",
       role: empDesignation,
       dept: empDept,
-      manager: empManager || "Hana Müller",
-      location: empLocation || "Remote",
+      manager: empManager || "Yogesh V",
+      location: empCategory || "VM", // Save Category in location field
       employmentType: empType,
-      costRate: Number(empCostRate) || 80,
-      billingRate: Number(empBillingRate) || 150,
+      costRate: Number(empCostRate) || 0.1,
+      billingRate: Number(empBillingRate) || 40,
       currency: empCurrency,
       joiningDate: empJoinDate || new Date().toISOString().split("T")[0],
       experienceYears: Number(empExperience) || 5,
       skills: formSkills,
-      status: "Available",
-      allocations: [],
+      status: empStatus as any || (empProjectAssignment ? "Allocated" : "Available"),
+      allocations: allocationsList,
       availabilityHrsWk: Number(empAvailability) || 40,
-      util: 0,
+      util: initialUtil,
       timesheets: []
     };
 
@@ -523,12 +585,18 @@ export default function ResourceModule() {
     setEmpName("");
     setEmpEmail("");
     setEmpPhone("");
-    setEmpDesignation("");
-    setEmpManager("");
+    setEmpDesignation("Other Cloud Service");
+    setEmpDept("Engineering");
+    setEmpManager("Yogesh V");
     setEmpLocation("");
-    setEmpCostRate("80");
-    setEmpBillingRate("150");
-    setEmpJoinDate("");
+    setEmpCostRate("0.1");
+    setEmpBillingRate("40");
+    setEmpCurrency("USD");
+    setEmpJoinDate("2026-06-17");
+    setEmpCategory("VM");
+    setEmpProjectAssignment("UVANTHU");
+    setEmpDescription("");
+    setEmpStatus("Available");
     setFormSkills([{ name: "React", level: "Advanced", yearsExp: 3 }]);
   };
 
@@ -1613,345 +1681,516 @@ export default function ResourceModule() {
       {/* ========================================================
           ADD RESOURCE DIALOG/MODAL
           ======================================================== */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* Backdrop */}
-          <div onClick={() => setIsAddModalOpen(false)} className="absolute inset-0 bg-black/60 backdrop-blur-xs" />
+      {isAddModalOpen && (() => {
+        const weeklyCost = (Number(empCostRate) || 0) * (Number(empAvailability) || 0);
+        const monthlyCost = weeklyCost * 4.33;
+        const weeklyRevenue = (Number(empBillingRate) || 0) * (Number(empAvailability) || 0);
 
-          {/* Form Container */}
-          <div className="relative bg-card border border-border rounded-2xl w-full max-w-lg shadow-elevated overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-secondary/20">
-              <h3 className="font-semibold text-foreground">Add New Resource Profile</h3>
-              <button 
-                onClick={() => setIsAddModalOpen(false)} 
-                className="p-1 rounded-lg hover:bg-secondary text-muted-foreground transition"
-              >
-                <X className="size-4.5" />
-              </button>
-            </div>
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <div onClick={() => setIsAddModalOpen(false)} className="absolute inset-0 bg-black/60 backdrop-blur-xs" />
 
-            {/* Tab selection in Form */}
-            <div className="flex border-b border-border bg-secondary/10 px-4 text-xs font-semibold">
-              <button 
-                type="button" 
-                onClick={() => setAddFormTab("basic")}
-                className={`px-3 py-2 border-b-2 transition ${addFormTab === "basic" ? "border-primary text-primary" : "border-transparent text-muted-foreground"}`}
-              >
-                Basic Details
-              </button>
-              <button 
-                type="button" 
-                onClick={() => setAddFormTab("cost")}
-                className={`px-3 py-2 border-b-2 transition ${addFormTab === "cost" ? "border-primary text-primary" : "border-transparent text-muted-foreground"}`}
-              >
-                Cost & Hours
-              </button>
-              <button 
-                type="button" 
-                onClick={() => setAddFormTab("skills")}
-                className={`px-3 py-2 border-b-2 transition ${addFormTab === "skills" ? "border-primary text-primary" : "border-transparent text-muted-foreground"}`}
-              >
-                Skills Profile
-              </button>
-            </div>
-
-            {/* Modal Form */}
-            <form onSubmit={handleSaveResource} className="p-6 space-y-4 text-xs">
-              {addFormTab === "basic" && (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Employee ID</label>
-                      <input 
-                        type="text" 
-                        placeholder="e.g. EMP-211" 
-                        value={empId}
-                        onChange={(e) => setEmpId(e.target.value)}
-                        className="w-full h-9 px-3 border border-border rounded-xl bg-secondary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Full Name</label>
-                      <input 
-                        type="text" 
-                        required 
-                        placeholder="e.g. Stephen Strange" 
-                        value={empName}
-                        onChange={(e) => setEmpName(e.target.value)}
-                        className="w-full h-9 px-3 border border-border rounded-xl bg-secondary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
+            {/* Form Container */}
+            <div className="relative bg-[#111111] border border-stone-800 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-stone-100 flex flex-col">
+              {/* Modal Header */}
+              <div className="px-6 py-4 border-b border-stone-850 flex items-start justify-between">
+                <div className="flex gap-3 items-center">
+                  <div className="size-9 rounded-xl bg-[#C67C4E]/10 border border-[#C67C4E]/25 flex items-center justify-center shrink-0">
+                    <UserPlus className="size-4.5 text-[#C67C4E]" />
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Email</label>
-                      <input 
-                        type="email" 
-                        required 
-                        placeholder="stephen@nexusflow.io" 
-                        value={empEmail}
-                        onChange={(e) => setEmpEmail(e.target.value)}
-                        className="w-full h-9 px-3 border border-border rounded-xl bg-secondary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Phone</label>
-                      <input 
-                        type="text" 
-                        placeholder="+1 (555) 000-0000" 
-                        value={empPhone}
-                        onChange={(e) => setEmpPhone(e.target.value)}
-                        className="w-full h-9 px-3 border border-border rounded-xl bg-secondary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Designation</label>
-                      <input 
-                        type="text" 
-                        required 
-                        placeholder="e.g. Data Scientist" 
-                        value={empDesignation}
-                        onChange={(e) => setEmpDesignation(e.target.value)}
-                        className="w-full h-9 px-3 border border-border rounded-xl bg-secondary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Department</label>
-                      <select 
-                        value={empDept}
-                        onChange={(e) => setEmpDept(e.target.value)}
-                        className="w-full h-9 px-2 border border-border rounded-xl bg-secondary/50"
-                      >
-                        <option value="Engineering">Engineering</option>
-                        <option value="Design">Design</option>
-                        <option value="Product">Product</option>
-                        <option value="Data">Data</option>
-                        <option value="QA">QA</option>
-                        <option value="DevOps">DevOps</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Manager</label>
-                      <input 
-                        type="text" 
-                        placeholder="e.g. Hana Müller" 
-                        value={empManager}
-                        onChange={(e) => setEmpManager(e.target.value)}
-                        className="w-full h-9 px-3 border border-border rounded-xl bg-secondary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Location</label>
-                      <input 
-                        type="text" 
-                        placeholder="e.g. New York, NY" 
-                        value={empLocation}
-                        onChange={(e) => setEmpLocation(e.target.value)}
-                        className="w-full h-9 px-3 border border-border rounded-xl bg-secondary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="font-medium text-muted-foreground">Employment Type</label>
-                    <select 
-                      value={empType}
-                      onChange={(e) => setEmpType(e.target.value as any)}
-                      className="w-full h-9 px-2 border border-border rounded-xl bg-secondary/50"
-                    >
-                      <option value="Full Time">Full Time</option>
-                      <option value="Contract">Contract</option>
-                      <option value="Consultant">Consultant</option>
-                    </select>
+                  <div>
+                    <h3 className="font-bold text-stone-100 text-sm">Add New Resource Profile</h3>
+                    <p className="text-[10px] text-stone-500 mt-0.5">Create a new resource profile to manage and track your organization resources.</p>
                   </div>
                 </div>
-              )}
+                <button 
+                  type="button"
+                  onClick={() => setIsAddModalOpen(false)} 
+                  className="p-1.5 rounded-lg hover:bg-stone-900 text-stone-500 hover:text-stone-300 transition cursor-pointer"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
 
-              {addFormTab === "cost" && (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Cost Rate ($ / hr)</label>
-                      <input 
-                        type="number" 
-                        min="1" 
-                        value={empCostRate}
-                        onChange={(e) => setEmpCostRate(e.target.value)}
-                        className="w-full h-9 px-3 border border-border rounded-xl bg-secondary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Billing Rate ($ / hr)</label>
-                      <input 
-                        type="number" 
-                        min="1" 
-                        value={empBillingRate}
-                        onChange={(e) => setEmpBillingRate(e.target.value)}
-                        className="w-full h-9 px-3 border border-border rounded-xl bg-secondary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Currency</label>
-                      <select 
-                        value={empCurrency}
-                        onChange={(e) => setEmpCurrency(e.target.value)}
-                        className="w-full h-9 px-2 border border-border rounded-xl bg-secondary/50"
-                      >
-                        <option value="USD">USD ($)</option>
-                        <option value="EUR">EUR (€)</option>
-                        <option value="GBP">GBP (£)</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Availability (hrs / wk)</label>
-                      <input 
-                        type="number" 
-                        min="1" 
-                        max="168"
-                        value={empAvailability}
-                        onChange={(e) => setEmpAvailability(e.target.value)}
-                        className="w-full h-9 px-3 border border-border rounded-xl bg-secondary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Experience (Years)</label>
-                      <input 
-                        type="number" 
-                        min="0" 
-                        value={empExperience}
-                        onChange={(e) => setEmpExperience(e.target.value)}
-                        className="w-full h-9 px-3 border border-border rounded-xl bg-secondary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-medium text-muted-foreground">Joining Date</label>
-                      <input 
-                        type="date" 
-                        value={empJoinDate}
-                        onChange={(e) => setEmpJoinDate(e.target.value)}
-                        className="w-full h-9 px-2 border border-border rounded-xl bg-secondary/50"
-                      />
-                    </div>
-                  </div>
+              {/* Steps Progress */}
+              <div className="flex items-center justify-center gap-6 py-3.5 border-b border-stone-850 bg-[#141414] text-[11px] font-semibold text-stone-400">
+                {/* Step 1: Basic Details */}
+                <div className="flex items-center gap-2">
+                  {addFormTab === "basic" ? (
+                    <span className="size-5 rounded-full bg-[#C67C4E] text-white flex items-center justify-center text-[10px]">1</span>
+                  ) : (
+                    <span className="size-5 rounded-full bg-[#C67C4E]/25 text-[#C67C4E] border border-[#C67C4E]/40 flex items-center justify-center text-[10px]">✓</span>
+                  )}
+                  <span className={addFormTab === "basic" ? "text-stone-100" : "text-stone-450"}>Basic Details</span>
                 </div>
-              )}
+                
+                <div className={`h-0.5 w-16 ${addFormTab !== "basic" ? "bg-[#C67C4E]" : "bg-stone-800"}`} />
 
-              {addFormTab === "skills" && (
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span className="font-semibold text-muted-foreground">Skills Directory Mapping</span>
-                    <button 
-                      type="button" 
-                      onClick={addSkillToForm}
-                      className="px-2.5 py-1 bg-secondary border border-border rounded-lg flex items-center gap-1 hover:bg-secondary/80 transition"
-                    >
-                      <Plus className="size-3" />Add Skill
-                    </button>
-                  </div>
+                {/* Step 2: Cost & Hours */}
+                <div className="flex items-center gap-2">
+                  {addFormTab === "cost" ? (
+                    <span className="size-5 rounded-full bg-[#C67C4E] text-white flex items-center justify-center text-[10px]">2</span>
+                  ) : addFormTab === "skills" ? (
+                    <span className="size-5 rounded-full bg-[#C67C4E]/25 text-[#C67C4E] border border-[#C67C4E]/40 flex items-center justify-center text-[10px]">✓</span>
+                  ) : (
+                    <span className="size-5 rounded-full border border-stone-800 text-stone-500 flex items-center justify-center text-[10px]">2</span>
+                  )}
+                  <span className={addFormTab === "cost" ? "text-stone-100" : "text-stone-450"}>Cost & Hours</span>
+                </div>
 
-                  <div className="space-y-3 max-h-[200px] overflow-y-auto pr-1">
-                    {formSkills.map((sk, idx) => (
-                      <div key={idx} className="p-3 bg-secondary/30 border border-border rounded-xl grid grid-cols-3 gap-2 relative">
-                        <div className="space-y-1 col-span-2">
-                          <label className="text-[9px] uppercase font-bold text-muted-foreground">Skill Name</label>
-                          <select 
-                            value={sk.name}
-                            onChange={(e) => {
-                              const newSk = [...formSkills];
-                              newSk[idx].name = e.target.value;
-                              setFormSkills(newSk);
-                            }}
-                            className="w-full h-8 px-2 bg-card border border-border rounded-lg"
+                <div className={`h-0.5 w-16 ${addFormTab === "skills" ? "bg-[#C67C4E]" : "bg-stone-800"}`} />
+
+                {/* Step 3: Skills Profile */}
+                <div className="flex items-center gap-2">
+                  {addFormTab === "skills" ? (
+                    <span className="size-5 rounded-full bg-[#C67C4E] text-white flex items-center justify-center text-[10px]">3</span>
+                  ) : (
+                    <span className="size-5 rounded-full border border-stone-800 text-stone-500 flex items-center justify-center text-[10px]">3</span>
+                  )}
+                  <span className={addFormTab === "skills" ? "text-stone-100" : "text-stone-450"}>Skills Profile</span>
+                </div>
+              </div>
+
+              {/* Two Column Layout Container */}
+              <form onSubmit={handleSaveResource} className="flex flex-col md:flex-row h-[420px]">
+                {/* Left Column (Inputs) */}
+                <div className="w-full md:w-[62%] p-5 overflow-y-auto border-r border-stone-850 space-y-4 text-xs">
+                  {addFormTab === "basic" && (
+                    <div className="space-y-3.5">
+                      {/* Resource Name & Verify with AI */}
+                      <div className="space-y-1">
+                        <label className="font-semibold text-stone-300">Resource Name *</label>
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500">
+                              <Layers className="size-3.5" />
+                            </span>
+                            <input
+                              type="text"
+                              required
+                              placeholder="e.g. Azure Virtual Machine"
+                              value={empName}
+                              onChange={(e) => setEmpName(e.target.value)}
+                              className="w-full h-9 pl-9 pr-4 border border-stone-850 bg-stone-900 rounded-xl text-stone-100 placeholder:text-stone-500 focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleVerifyWithAI}
+                            disabled={isVerifying || !empName}
+                            className="h-9 px-3 rounded-xl border border-stone-800 bg-stone-900 hover:bg-stone-850 text-[11px] text-stone-300 font-semibold inline-flex items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                           >
-                            {ALL_SKILLS.map(s => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="text-[9px] uppercase font-bold text-muted-foreground">Proficiency</label>
-                          <select 
-                            value={sk.level}
-                            onChange={(e) => {
-                              const newSk = [...formSkills];
-                              newSk[idx].level = e.target.value as any;
-                              setFormSkills(newSk);
-                            }}
-                            className="w-full h-8 px-2 bg-card border border-border rounded-lg"
-                          >
-                            <option value="Beginner">Beginner</option>
-                            <option value="Intermediate">Intermediate</option>
-                            <option value="Advanced">Advanced</option>
-                            <option value="Expert">Expert</option>
-                            <option value="Architect">Architect</option>
-                          </select>
-                        </div>
-
-                        <div className="space-y-1 col-span-2">
-                          <label className="text-[9px] uppercase font-bold text-muted-foreground">Certification Name</label>
-                          <input 
-                            type="text" 
-                            placeholder="Optional" 
-                            value={sk.certification || ""}
-                            onChange={(e) => {
-                              const newSk = [...formSkills];
-                              newSk[idx].certification = e.target.value;
-                              setFormSkills(newSk);
-                            }}
-                            className="w-full h-8 px-2 bg-card border border-border rounded-lg"
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="text-[9px] uppercase font-bold text-muted-foreground">Experience (Yrs)</label>
-                          <input 
-                            type="number" 
-                            value={sk.yearsExp}
-                            onChange={(e) => {
-                              const newSk = [...formSkills];
-                              newSk[idx].yearsExp = Number(e.target.value) || 1;
-                              setFormSkills(newSk);
-                            }}
-                            className="w-full h-8 px-2 bg-card border border-border rounded-lg"
-                          />
-                        </div>
-
-                        {formSkills.length > 1 && (
-                          <button 
-                            type="button" 
-                            onClick={() => removeSkillFromForm(idx)}
-                            className="absolute right-2 top-2 text-red-500 hover:bg-red-500/10 p-0.5 rounded"
-                          >
-                            <X className="size-3.5" />
+                            <Sparkles className="size-3.5 text-[#C67C4E] animate-pulse" />
+                            Verify with AI
                           </button>
-                        )}
+                        </div>
+                        <span className="text-[10px] text-stone-500 block">Enter a unique and descriptive name for this resource.</span>
                       </div>
-                    ))}
+
+                      {/* Resource Type & Department */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Resource Type / Specification *</label>
+                          <select
+                            value={empDesignation}
+                            onChange={(e) => setEmpDesignation(e.target.value)}
+                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                          >
+                            <option value="Other Cloud Service">Other Cloud Service</option>
+                            <option value="AWS EC2 Instance">AWS EC2 Instance</option>
+                            <option value="AWS S3 Storage">AWS S3 Storage</option>
+                            <option value="AWS RDS Database">AWS RDS Database</option>
+                            <option value="GCP Compute VM">GCP Compute VM</option>
+                            <option value="Azure Virtual Machine">Azure Virtual Machine</option>
+                            <option value="OpenAI API Service">OpenAI API Service</option>
+                            <option value="Frontend Engineer">Frontend Engineer</option>
+                            <option value="Backend Engineer">Backend Engineer</option>
+                            <option value="Product Designer">Product Designer</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Department / Team *</label>
+                          <select
+                            value={empDept}
+                            onChange={(e) => setEmpDept(e.target.value)}
+                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                          >
+                            <option value="Engineering">Engineering</option>
+                            <option value="Design">Design</option>
+                            <option value="Product">Product</option>
+                            <option value="Data">Data</option>
+                            <option value="QA">QA</option>
+                            <option value="DevOps">DevOps</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Manager / Owner & Status */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Manager / Owner *</label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500">
+                              <User className="size-3.5" />
+                            </span>
+                            <input
+                              type="text"
+                              required
+                              placeholder="e.g. Yogesh V"
+                              value={empManager}
+                              onChange={(e) => setEmpManager(e.target.value)}
+                              className="w-full h-9 pl-9 pr-4 border border-stone-850 bg-stone-900 rounded-xl text-stone-100 placeholder:text-stone-500 focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Resource Status *</label>
+                          <select
+                            value={empStatus}
+                            onChange={(e) => setEmpStatus(e.target.value)}
+                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                          >
+                            <option value="Available">🟢 Active / Available</option>
+                            <option value="Allocated">🔵 Allocated</option>
+                            <option value="Partially Allocated">🟡 Partially Allocated</option>
+                            <option value="Bench">⚪ Bench</option>
+                            <option value="On Leave">🔴 On Leave</option>
+                            <option value="Inactive">⚫ Inactive</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Project Assignment */}
+                      <div className="space-y-1">
+                        <label className="font-semibold text-stone-300">Project Assignment *</label>
+                        <select
+                          value={empProjectAssignment}
+                          onChange={(e) => setEmpProjectAssignment(e.target.value)}
+                          className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                        >
+                          <option value="UVANTHU">UVANTHU</option>
+                          <option value="Atlas Banking Platform">Atlas Banking Platform</option>
+                          <option value="Helix CRM Migration">Helix CRM Migration</option>
+                          <option value="Nimbus Data Lake">Nimbus Data Lake</option>
+                          <option value="Mosaic Mobile Suite">Mosaic Mobile Suite</option>
+                          <option value="Lumen Customer 360">Lumen Customer 360</option>
+                        </select>
+                        <span className="text-[10px] text-stone-500 block">Assign this resource to a project during provisioning.</span>
+                      </div>
+
+                      {/* Resource Description */}
+                      <div className="space-y-1">
+                        <label className="font-semibold text-stone-300">Resource Description</label>
+                        <textarea
+                          placeholder="Provide a brief description about this resource and its purpose."
+                          value={empDescription}
+                          onChange={(e) => setEmpDescription(e.target.value)}
+                          className="w-full h-16 p-3 border border-stone-850 bg-stone-900 rounded-xl text-stone-100 placeholder:text-stone-500 focus:outline-none focus:ring-1 focus:ring-[#C67C4E] resize-none"
+                        />
+                        <span className="text-[10px] text-stone-500 block">Provide a brief description about this resource and its purpose.</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {addFormTab === "cost" && (
+                    <div className="space-y-4">
+                      {/* Cost Rate & Billing Rate */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Cost Rate ($ / hr) *</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={empCostRate}
+                            onChange={(e) => setEmpCostRate(e.target.value)}
+                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Billing Rate ($ / hr) *</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            value={empBillingRate}
+                            onChange={(e) => setEmpBillingRate(e.target.value)}
+                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Currency & Availability */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Currency *</label>
+                          <select
+                            value={empCurrency}
+                            onChange={(e) => setEmpCurrency(e.target.value)}
+                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                          >
+                            <option value="USD">USD ($)</option>
+                            <option value="EUR">EUR (€)</option>
+                            <option value="GBP">GBP (£)</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Availability (hrs / wk) *</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="168"
+                            value={empAvailability}
+                            onChange={(e) => setEmpAvailability(e.target.value)}
+                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Resource Category & Provisioning Date */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Resource Category *</label>
+                          <select
+                            value={empCategory}
+                            onChange={(e) => setEmpCategory(e.target.value)}
+                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                          >
+                            <option value="VM">VM</option>
+                            <option value="Storage">Storage</option>
+                            <option value="Database">Database</option>
+                            <option value="Cache">Cache</option>
+                            <option value="LLM">LLM</option>
+                            <option value="SaaS API">SaaS API</option>
+                            <option value="Human">Human</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Provisioning Date *</label>
+                          <div className="relative">
+                            <input
+                              type="date"
+                              required
+                              value={empJoinDate}
+                              onChange={(e) => setEmpJoinDate(e.target.value)}
+                              className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Calculated Resource Economics */}
+                      <div className="pt-4 space-y-3">
+                        <div className="flex items-center gap-1.5 text-stone-300 font-semibold">
+                          <DollarSign className="size-4 text-[#C67C4E]" />
+                          <span>CALCULATED RESOURCE ECONOMICS</span>
+                          <span className="text-[10px] text-stone-500 font-normal ml-auto">Real-time Estimation</span>
+                        </div>
+                        
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="bg-stone-950/40 border border-stone-850 p-3.5 rounded-xl space-y-1">
+                            <div className="text-[9px] uppercase font-semibold text-stone-500">Weekly Cost</div>
+                            <div className="text-sm font-bold text-[#C67C4E]">${weeklyCost.toFixed(2)}</div>
+                          </div>
+                          <div className="bg-stone-950/40 border border-stone-850 p-3.5 rounded-xl space-y-1">
+                            <div className="text-[9px] uppercase font-semibold text-stone-500">Monthly Cost</div>
+                            <div className="text-sm font-bold text-stone-100">${monthlyCost.toFixed(2)}</div>
+                          </div>
+                          <div className="bg-stone-950/40 border border-stone-850 p-3.5 rounded-xl space-y-1">
+                            <div className="text-[9px] uppercase font-semibold text-stone-500">Weekly Revenue</div>
+                            <div className="text-sm font-bold text-emerald-500">${weeklyRevenue.toFixed(2)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {addFormTab === "skills" && (
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center">
+                        <span className="font-semibold text-stone-300">Skills Directory Mapping</span>
+                        <button 
+                          type="button" 
+                          onClick={addSkillToForm}
+                          className="px-2.5 py-1.5 bg-stone-900 border border-stone-800 rounded-lg flex items-center gap-1 hover:bg-stone-850 text-stone-250 transition text-[11px] cursor-pointer"
+                        >
+                          <Plus className="size-3 text-[#C67C4E]" />Add Skill
+                        </button>
+                      </div>
+
+                      <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
+                        {formSkills.map((sk, idx) => (
+                          <div key={idx} className="p-3 bg-stone-950/40 border border-stone-850 rounded-xl grid grid-cols-3 gap-2 relative">
+                            <div className="space-y-1 col-span-2">
+                              <label className="text-[9px] uppercase font-bold text-stone-400">Skill Name</label>
+                              <select 
+                                value={sk.name}
+                                onChange={(e) => {
+                                  const newSk = [...formSkills];
+                                  newSk[idx].name = e.target.value;
+                                  setFormSkills(newSk);
+                                }}
+                                className="w-full h-8 px-2 bg-stone-900 border border-stone-800 text-stone-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                              >
+                                {ALL_SKILLS.map(s => (
+                                  <option key={s} value={s}>{s}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[9px] uppercase font-bold text-stone-400">Proficiency</label>
+                              <select 
+                                value={sk.level}
+                                onChange={(e) => {
+                                  const newSk = [...formSkills];
+                                  newSk[idx].level = e.target.value as any;
+                                  setFormSkills(newSk);
+                                }}
+                                className="w-full h-8 px-2 bg-stone-900 border border-stone-800 text-stone-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                              >
+                                <option value="Beginner">Beginner</option>
+                                <option value="Intermediate">Intermediate</option>
+                                <option value="Advanced">Advanced</option>
+                                <option value="Expert">Expert</option>
+                                <option value="Architect">Architect</option>
+                              </select>
+                            </div>
+
+                            <div className="space-y-1 col-span-2">
+                              <label className="text-[9px] uppercase font-bold text-stone-400">Certification Name</label>
+                              <input 
+                                type="text" 
+                                placeholder="Optional" 
+                                value={sk.certification || ""}
+                                onChange={(e) => {
+                                  const newSk = [...formSkills];
+                                  newSk[idx].certification = e.target.value;
+                                  setFormSkills(newSk);
+                                }}
+                                className="w-full h-8 px-2 bg-stone-900 border border-stone-800 text-stone-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[9px] uppercase font-bold text-stone-400">Experience (Yrs)</label>
+                              <input 
+                                type="number" 
+                                value={sk.yearsExp}
+                                onChange={(e) => {
+                                  const newSk = [...formSkills];
+                                  newSk[idx].yearsExp = Number(e.target.value) || 1;
+                                  setFormSkills(newSk);
+                                }}
+                                className="w-full h-8 px-2 bg-stone-900 border border-stone-800 text-stone-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                              />
+                            </div>
+
+                            {formSkills.length > 1 && (
+                              <button 
+                                type="button" 
+                                onClick={() => removeSkillFromForm(idx)}
+                                className="absolute right-2 top-2 text-red-500 hover:bg-red-500/10 p-0.5 rounded cursor-pointer"
+                              >
+                                <X className="size-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Column (Resource Preview) */}
+                <div className="w-full md:w-[38%] p-5 bg-[#141414] overflow-y-auto space-y-4 flex flex-col justify-start">
+                  <div className="flex items-center gap-1.5 text-stone-400 font-bold text-[9.5px] uppercase tracking-wider">
+                    <Eye className="size-3.5 text-stone-500" />
+                    <span>Resource Preview</span>
+                  </div>
+
+                  {/* Preview Avatar card */}
+                  <div className="bg-stone-900 border border-stone-850 rounded-2xl p-4 flex flex-col items-center justify-center text-center space-y-2 relative overflow-hidden shadow-inner">
+                    <div className="size-14 rounded-2xl bg-stone-950 border border-stone-850 flex items-center justify-center relative shadow-sm">
+                      <svg className="size-7 text-[#C67C4E]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M17.5 19A3.5 3.5 0 0 0 21 15.5c0-2.79-2.54-4.5-5-4.5-.48 0-.96.06-1.4.17A5.5 5.5 0 0 0 6.5 10c-2.3 0-4.14 1.7-4.47 3.93A3.5 3.5 0 0 0 5.5 19" />
+                      </svg>
+                      <span className="absolute bottom-1 right-1 size-3.5 rounded bg-[#C67C4E] text-white flex items-center justify-center text-[7px] font-bold">
+                        📦
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="font-bold text-stone-100 text-[11px] truncate max-w-[190px]">{empName || "Resource Name"}</h4>
+                      <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[8.5px] font-semibold text-emerald-500">
+                        <span className="size-1 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>{empStatus || "Available"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Preview Table details */}
+                  <div className="space-y-2 text-[9.5px] pt-1 flex-1">
+                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
+                      <span className="text-stone-500 uppercase font-semibold">Department / Team</span>
+                      <span className="font-semibold text-stone-300">{empDept}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
+                      <span className="text-stone-500 uppercase font-semibold">Manager / Owner</span>
+                      <span className="font-semibold text-stone-300">{empManager || "Yogesh V"}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
+                      <span className="text-stone-500 uppercase font-semibold">Type / Specification</span>
+                      <span className="font-semibold text-stone-300 truncate max-w-[120px]">{empDesignation || "Other Cloud Service"}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
+                      <span className="text-stone-500 uppercase font-semibold">Assigned Project</span>
+                      <span className="font-bold text-[#C67C4E]">{empProjectAssignment || "UVANTHU"}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
+                      <span className="text-stone-500 uppercase font-semibold">Cost Rate</span>
+                      <span className="font-semibold text-stone-300">${Number(empCostRate || 0).toFixed(2)}/hr</span>
+                    </div>
+                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
+                      <span className="text-stone-500 uppercase font-semibold">Availability</span>
+                      <span className="font-semibold text-stone-300">{empAvailability} hrs/wk</span>
+                    </div>
+                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
+                      <span className="text-stone-500 uppercase font-semibold">Total Weekly Cost</span>
+                      <span className="font-bold text-[#C67C4E]">${weeklyCost.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
+                      <span className="text-stone-500 uppercase font-semibold">Total Monthly Cost</span>
+                      <span className="font-bold text-stone-300">${monthlyCost.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between pb-1.5">
+                      <span className="text-stone-500 uppercase font-semibold">Total Weekly Billing</span>
+                      <span className="font-bold text-emerald-500">${weeklyRevenue.toFixed(2)}</span>
+                    </div>
+                    
+                    {/* Skills Mapped (Only visible on Step 1 preview) */}
+                    {addFormTab === "basic" && (
+                      <div className="pt-2 border-t border-stone-850/60 space-y-1">
+                        <span className="text-stone-500 uppercase font-semibold block">Skills Mapped ({formSkills.length})</span>
+                        <div className="flex flex-wrap gap-1">
+                          {formSkills.map((sk, i) => (
+                            <span key={i} className="px-2 py-0.5 rounded bg-stone-900 text-stone-350 border border-stone-800 text-[8.5px] font-semibold">
+                              {sk.name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
+              </form>
 
-              {/* Action buttons */}
-              <div className="pt-4 border-t border-border flex justify-end gap-2">
+              {/* Action buttons (Modal Footer) */}
+              <div className="px-6 py-4 border-t border-stone-850 flex justify-between bg-stone-950/20 text-xs">
                 <button 
                   type="button" 
                   onClick={() => setIsAddModalOpen(false)}
-                  className="h-9 px-4 rounded-xl border border-border hover:bg-secondary"
+                  className="h-9.5 px-4 rounded-xl border border-stone-800 text-stone-300 font-semibold hover:bg-stone-900 transition cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1962,23 +2201,27 @@ export default function ResourceModule() {
                       if (addFormTab === "basic") setAddFormTab("cost");
                       else if (addFormTab === "cost") setAddFormTab("skills");
                     }}
-                    className="h-9 px-4 rounded-xl bg-primary text-white font-medium shadow-copper hover:opacity-90"
+                    className="h-9.5 px-4 rounded-xl bg-[#C67C4E] text-white font-semibold shadow-sm hover:opacity-90 transition cursor-pointer inline-flex items-center gap-1"
                   >
-                    Next
+                    Continue <ArrowRight className="size-3.5" />
                   </button>
                 ) : (
                   <button 
-                    type="submit"
-                    className="h-9 px-4 rounded-xl bg-gradient-to-r from-primary to-accent text-white font-medium shadow-copper hover:opacity-90"
+                    type="button"
+                    onClick={(e) => {
+                      const mockEvent = { preventDefault: () => {} } as any;
+                      handleSaveResource(mockEvent);
+                    }}
+                    className="h-9.5 px-4 rounded-xl bg-[#C67C4E] text-white font-semibold shadow-sm hover:opacity-90 transition cursor-pointer"
                   >
                     Save Resource
                   </button>
                 )}
               </div>
-            </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================
           ALLOCATE TO PROJECTS MODAL
