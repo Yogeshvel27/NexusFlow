@@ -18,8 +18,6 @@ export default function LoginPage() {
   }, [isSignedIn, router]);
   const { signIn, fetchStatus: signInFetchStatus } = useSignIn();
   const { signUp, fetchStatus: signUpFetchStatus } = useSignUp();
-  const isSignInLoaded = !!signIn && signInFetchStatus !== "fetching";
-  const isSignUpLoaded = !!signUp && signUpFetchStatus !== "fetching";
 
   const finalizeSession = async (finalize: (params?: { navigate?: (ctx: { session: { currentTask?: unknown } | null; decorateUrl: (url: string) => string }) => void }) => Promise<{ error: unknown }>) => {
     const { error } = await finalize({
@@ -35,19 +33,10 @@ export default function LoginPage() {
     });
     return error;
   };
-
-  useEffect(() => {
-    if (!isSignInLoaded || !isSignUpLoaded) {
-      const timer = setTimeout(() => {
-        console.warn(
-          "[NexusFlow Diagnostic] Clerk auth/registration client is still not loaded after 5 seconds. " +
-          "Please verify that https://gorgeous-eel-85.clerk.accounts.dev is accessible and not blocked by an adblocker or security policy."
-        );
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [isSignInLoaded, isSignUpLoaded]);
-
+  
+  const isSignInLoaded = !!signIn && signInFetchStatus !== "fetching";
+  const isSignUpLoaded = !!signUp && signUpFetchStatus !== "fetching";
+  
   const [email, setEmail] = useState("");
   const [pwd, setPwd] = useState("");
   const [pending, setPending] = useState(false);
@@ -56,15 +45,15 @@ export default function LoginPage() {
   const [verificationMode, setVerificationMode] = useState<"signup" | "client-trust" | null>(null);
   const [code, setCode] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-
+  
   const [isMuted, setIsMuted] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
-
+  
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.muted = isMuted;
       videoRef.current.volume = 0.35; // Set volume to 35% for a clear background volume level
-
+      
       // Programmatically play to satisfy browser autoplay requirements
       videoRef.current.play().catch((err) => {
         console.warn("Autoplay was prevented or video failed to play:", err);
@@ -246,15 +235,15 @@ export default function LoginPage() {
     try {
       const { error } = isSignUp
         ? await signUp.sso({
-          strategy: "oauth_google",
-          redirectUrl: "/dashboard",
-          redirectCallbackUrl: "/sso-callback",
-        })
+            strategy: "oauth_google",
+            redirectUrl: "/dashboard",
+            redirectCallbackUrl: "/sso-callback",
+          })
         : await signIn.sso({
-          strategy: "oauth_google",
-          redirectUrl: "/dashboard",
-          redirectCallbackUrl: "/sso-callback",
-        });
+            strategy: "oauth_google",
+            redirectUrl: "/dashboard",
+            redirectCallbackUrl: "/sso-callback",
+          });
       if (error) {
         toast.error(error.message || "An error occurred during Google authentication.");
       }
@@ -269,12 +258,12 @@ export default function LoginPage() {
     <div className="min-h-screen w-full grid lg:grid-cols-2 bg-transparent">
       {/* Left — luxury illustration */}
       <div className="relative hidden lg:flex flex-col justify-between p-12 overflow-hidden bg-sidebar text-white">
-        <video
+        <video 
           ref={videoRef}
-          autoPlay
-          loop
-          muted
-          playsInline
+          autoPlay 
+          loop 
+          muted 
+          playsInline 
           className="absolute inset-0 w-full h-full object-cover opacity-35 pointer-events-none z-0"
         >
           <source src="/NexusFlow_Enterprise_Hero_Vide.mp4" type="video/mp4" />
@@ -311,7 +300,7 @@ export default function LoginPage() {
 
         <div className="custom-login-card">
           <div className="custom-logo-wrapper">
-            <img src={logo.src} className="h-16 w-auto object-contain mx-auto" alt="NexusFlow Logo" />
+            <img src={logo.src} className="h-30 w-auto object-contain mx-auto" alt="NexusFlow Logo" />
           </div>
 
           {verifying ? (
@@ -323,9 +312,9 @@ export default function LoginPage() {
               <form onSubmit={handleVerify}>
                 <div className="custom-input-group">
                   <label>Verification Code</label>
-                  <input
-                    type="text"
-                    placeholder="123456"
+                  <input 
+                    type="text" 
+                    placeholder="123456" 
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
                     autoComplete="one-time-code"
@@ -335,8 +324,8 @@ export default function LoginPage() {
                 <button type="submit" disabled={pending} className="custom-login-btn disabled:opacity-70 mt-2">
                   {pending ? "Verifying..." : "Verify Code"}
                 </button>
-                <button
-                  type="button"
+                <button 
+                  type="button" 
                   onClick={() => {
                     setVerifying(false);
                     setVerificationMode(null);
@@ -357,9 +346,9 @@ export default function LoginPage() {
               <form onSubmit={submit}>
                 <div className="custom-input-group">
                   <label>Email Address</label>
-                  <input
-                    type="email"
-                    placeholder="name@company.com"
+                  <input 
+                    type="email" 
+                    placeholder="name@company.com" 
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     autoComplete="email"
@@ -369,9 +358,9 @@ export default function LoginPage() {
                 <div className="custom-input-group">
                   <label>Password</label>
                   <div className="relative flex items-center">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      placeholder="••••••••"
+                    <input 
+                      type={showPassword ? "text" : "password"} 
+                      placeholder="••••••••" 
                       value={pwd}
                       onChange={(e) => setPwd(e.target.value)}
                       autoComplete={isSignUp ? "new-password" : "current-password"}
@@ -399,7 +388,7 @@ export default function LoginPage() {
                     </button>
                   </div>
                 </div>
-
+                
                 {!isSignUp && (
                   <div className="custom-options">
                     <label className="custom-remember">
@@ -422,7 +411,7 @@ export default function LoginPage() {
               </form>
               <p className="custom-footer-text">
                 {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
-                <button
+                <button 
                   type="button"
                   onClick={() => setIsSignUp(!isSignUp)}
                   className="text-primary hover:underline font-medium ml-1 cursor-pointer bg-transparent border-none p-0 inline"
