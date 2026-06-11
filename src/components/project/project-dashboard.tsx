@@ -430,7 +430,7 @@ export function ProjectDashboard({
 
       {/* Member Profile Drawer */}
       {selectedProfile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-end">
+        <div className="fixed inset-0 z-[60] flex items-center justify-end">
           <div onClick={() => setSelectedProfile(null)} className="absolute inset-0 bg-black/60 backdrop-blur-xs" />
           
           <div className="relative bg-card border-l border-border h-full w-full max-w-lg shadow-elevated flex flex-col overflow-hidden animate-in slide-in-from-right duration-250">
