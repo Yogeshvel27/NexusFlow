@@ -21,8 +21,10 @@ import {
   Sparkles,
   ClipboardList,
   Activity,
-  UserPlus
+  UserPlus,
+  Plus
 } from "lucide-react";
+import { CreateTaskModal } from "@/components/project/create-task-modal";
 import { StatusChip, statusTone } from "@/components/status-chip";
 import { formatCurrency, resources } from "@/lib/mock";
 import { toast } from "sonner";
@@ -33,6 +35,7 @@ export default function ProjectDetailPage() {
   const { projects, tasks, updateProjectStatus } = useWorkspace();
   const [activeTab, setActiveTab] = useState<"dashboard" | "kanban" | "backlog" | "gantt" | "audit">("dashboard");
   const [triggerAddMember, setTriggerAddMember] = useState(false);
+  const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
 
   // Audit comments state
   const [auditComment, setAuditComment] = useState("");
@@ -174,6 +177,13 @@ export default function ProjectDetailPage() {
 
           {/* Workflow Action Panel */}
           <div className="flex flex-col gap-2.5 items-end relative w-48">
+            <button
+              onClick={() => setShowCreateTaskModal(true)}
+              className="h-9 px-3.5 rounded-xl bg-gradient-to-r from-primary to-accent text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition shadow-copper cursor-pointer w-full"
+            >
+              <Plus className="size-3.5" /> Add Task
+            </button>
+
             {(!orgRole || 
               orgRole.toLowerCase().includes("admin") || 
               orgRole.toLowerCase().includes("project_manager") || 
@@ -398,7 +408,12 @@ export default function ProjectDetailPage() {
           </div>
         )}
       </div>
-
+      {showCreateTaskModal && (
+        <CreateTaskModal
+          projectId={project.id}
+          onClose={() => setShowCreateTaskModal(false)}
+        />
+      )}
     </div>
   );
 }
