@@ -75,6 +75,7 @@ export function OrganizationModal({ open, onClose }: Props) {
   if (!open) return null;
 
   const isAdmin = membership?.role === "org:admin";
+  const canInvite = !!(membership?.role && membership.role !== "org:member");
 
   const members = ((memberships?.data ?? []) as any[]).filter((m: any) => {
     if (!search) return true;
@@ -157,7 +158,7 @@ export function OrganizationModal({ open, onClose }: Props) {
   return (
     <>
       {/* ── Fixed-position role dropdown portal ── */}
-      {roleOpen && dropPos && isAdmin && (
+      {roleOpen && dropPos && canInvite && (
         <div
           style={{
             position: "fixed",
@@ -204,9 +205,9 @@ export function OrganizationModal({ open, onClose }: Props) {
           style={{
             background: S.bg,
             border: `1px solid ${S.border}`,
-            maxWidth: !isLoaded ? "450px" : isAdmin ? "1150px" : "620px",
-            height: !isLoaded ? "350px" : isAdmin ? "90vh" : "auto",
-            minHeight: !isLoaded ? "350px" : isAdmin ? "600px" : "unset",
+            maxWidth: !isLoaded ? "450px" : canInvite ? "1150px" : "620px",
+            height: !isLoaded ? "350px" : canInvite ? "90vh" : "auto",
+            minHeight: !isLoaded ? "350px" : canInvite ? "600px" : "unset",
           }}
         >
           {!isLoaded ? (
@@ -214,7 +215,7 @@ export function OrganizationModal({ open, onClose }: Props) {
               <Loader2 className="size-8 animate-spin text-[#C67C4E]" />
               <span className="text-sm text-stone-400">Loading organization details...</span>
             </div>
-          ) : isAdmin ? (
+          ) : canInvite ? (
             <>
               {/* ── ADMIN VIEW: SIDEBAR + MEMBERS MANAGEMENT ── */}
               {/* LEFT SIDEBAR */}
@@ -435,36 +436,42 @@ export function OrganizationModal({ open, onClose }: Props) {
                                 </td>
                                 <td className="py-2.5 pr-4 text-xs" style={{ color: S.sub }}>{fmtDate(m.createdAt)}</td>
                                 <td className="py-2.5 pr-4">
-                                  <div className="relative inline-block">
-                                    <button
-                                      onClick={() => setMRoleOpen(mRoleOpen === m.id ? null : m.id)}
-                                      className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium"
-                                      style={{ background: "rgba(255,255,255,0.06)", color: S.text, border: "1px solid rgba(255,255,255,0.08)" }}
-                                    >
+                                  {isAdmin ? (
+                                    <div className="relative inline-block">
+                                      <button
+                                        onClick={() => setMRoleOpen(mRoleOpen === m.id ? null : m.id)}
+                                        className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium"
+                                        style={{ background: "rgba(255,255,255,0.06)", color: S.text, border: "1px solid rgba(255,255,255,0.08)" }}
+                                      >
+                                        {roleLabel(m.role)}
+                                        <ChevronDown className="size-3" style={{ color: S.muted }} />
+                                      </button>
+                                      {mRoleOpen === m.id && !isMe && (
+                                        <div className="absolute left-0 top-9 z-50 rounded-lg overflow-hidden shadow-2xl py-1" style={{ background: S.input, border: "1px solid rgba(198,124,78,0.2)", minWidth: 170 }}>
+                                          {ROLES.map((r) => (
+                                            <button
+                                              key={r.key}
+                                              onClick={() => updateRole(m.publicUserData?.userId!, r.key)}
+                                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left"
+                                              style={{ color: m.role === r.key ? S.gold : S.text }}
+                                              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(198,124,78,0.12)")}
+                                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                                            >
+                                              {r.label}
+                                              {m.role === r.key && <Check className="size-3 ml-auto" style={{ color: S.primary }} />}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs font-medium" style={{ color: S.sub }}>
                                       {roleLabel(m.role)}
-                                      <ChevronDown className="size-3" style={{ color: S.muted }} />
-                                    </button>
-                                    {mRoleOpen === m.id && !isMe && (
-                                      <div className="absolute left-0 top-9 z-50 rounded-lg overflow-hidden shadow-2xl py-1" style={{ background: S.input, border: "1px solid rgba(198,124,78,0.2)", minWidth: 170 }}>
-                                        {ROLES.map((r) => (
-                                          <button
-                                            key={r.key}
-                                            onClick={() => updateRole(m.publicUserData?.userId!, r.key)}
-                                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left"
-                                            style={{ color: m.role === r.key ? S.gold : S.text }}
-                                            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(198,124,78,0.12)")}
-                                            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                                          >
-                                            {r.label}
-                                            {m.role === r.key && <Check className="size-3 ml-auto" style={{ color: S.primary }} />}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="py-2.5">
-                                  {!isMe && (
+                                  {!isMe && isAdmin && (
                                     <div className="relative inline-block">
                                       <button
                                         onClick={() => setActOpen(actOpen === m.id ? null : m.id)}
