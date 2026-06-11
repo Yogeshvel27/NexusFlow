@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { X, Send, Paperclip, Clock, Shield, AlertTriangle, Trash } from "lucide-react";
+import { X, Send, Paperclip, Clock, Shield, AlertTriangle, Trash, Play, Pause } from "lucide-react";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { WorkItem, validateTaskTransition } from "@/lib/store";
 import { TaskTypeIcon } from "@/components/task-type-icon";
@@ -255,6 +255,34 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
           </div>
           
           <div className="flex items-center gap-2">
+            {task.status === "In Progress" ? (
+              <button
+                onClick={() => {
+                  const success = transitionTaskStatus(task.id, "To Do");
+                  if (success) toast.success(`Paused task ${task.id}`);
+                }}
+                className="h-8 px-3 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer shadow-sm animate-pulse"
+                title="Pause Task"
+              >
+                <Pause className="size-3.5" /> Pause Task
+              </button>
+            ) : (
+              task.status !== "Done" && task.status !== "Cancelled" && task.type !== "Epic" && (
+                <button
+                  onClick={() => {
+                    const success = transitionTaskStatus(task.id, "In Progress");
+                    if (success) toast.success(`Started task ${task.id}`);
+                  }}
+                  className="h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                  title="Start Task"
+                >
+                  <Play className="size-3.5" /> Start Task
+                </button>
+              )
+            )}
+
+            <div className="h-5 w-px bg-border mx-1" />
+
             <button
               onClick={handleDelete}
               className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition"

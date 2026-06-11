@@ -16,7 +16,9 @@ import {
   AlertCircle,
   Tag,
   Trash,
-  MoveRight
+  MoveRight,
+  Play,
+  Pause
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -25,7 +27,7 @@ interface ProjectBacklogProps {
 }
 
 export function ProjectBacklog({ projectId }: ProjectBacklogProps) {
-  const { tasks, updateTask, deleteTask } = useWorkspace();
+  const { tasks, updateTask, deleteTask, transitionTaskStatus } = useWorkspace();
   const [selectedTask, setSelectedTask] = useState<WorkItem | null>(null);
 
   // Tree toggle state (collapsed Epic IDs or Task IDs)
@@ -181,7 +183,36 @@ export function ProjectBacklog({ projectId }: ProjectBacklogProps) {
             </span>
             <span className="w-12 text-right font-medium">{t.priority}</span>
             <span className="w-16 truncate">{t.assignee || <span className="italic text-muted-foreground/60">Unassigned</span>}</span>
-            <span className="w-12 text-right tabular-nums">{t.actualHours}/{t.estimatedHours}h</span>
+            <div className="w-20 flex items-center justify-end gap-1.5">
+              <span className="tabular-nums">{t.actualHours}/{t.estimatedHours}h</span>
+              {t.status === "In Progress" ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const success = transitionTaskStatus(t.id, "To Do");
+                    if (success) toast.success(`Paused task ${t.id}`);
+                  }}
+                  className="p-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 transition cursor-pointer animate-pulse"
+                  title="Pause Task"
+                >
+                  <Pause className="size-3" />
+                </button>
+              ) : (
+                t.status !== "Done" && t.status !== "Cancelled" && t.type !== "Epic" && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const success = transitionTaskStatus(t.id, "In Progress");
+                      if (success) toast.success(`Started task ${t.id}`);
+                    }}
+                    className="p-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 transition cursor-pointer"
+                    title="Start Task"
+                  >
+                    <Play className="size-3" />
+                  </button>
+                )
+              )}
+            </div>
             
             {/* Quick Add Subtask Button */}
             {(t.type === "Task" || t.type === "Bug" || t.type === "Improvement" || t.type === "Feature Request" || t.type === "UX" || t.type === "Technology") && (

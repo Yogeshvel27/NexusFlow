@@ -7,7 +7,7 @@ import { TaskTypeIcon } from "@/components/task-type-icon";
 import { resources } from "@/lib/mock";
 import { TaskDetailModal } from "./task-detail-modal";
 import { CreateTaskModal } from "./create-task-modal";
-import { AlertCircle, RotateCcw, Ban, Sparkles, Plus } from "lucide-react";
+import { AlertCircle, RotateCcw, Ban, Sparkles, Plus, Play, Pause } from "lucide-react";
 import { toast } from "sonner";
 
 interface ProjectKanbanProps {
@@ -206,7 +206,36 @@ export function ProjectKanban({ projectId }: ProjectKanbanProps) {
 
                       {/* Footer: Assignee & Hours */}
                       <div className="mt-3 pt-2 border-t border-border/30 flex items-center justify-between text-[10px] text-muted-foreground">
-                        <span className="tabular-nums font-semibold">{t.actualHours}/{t.estimatedHours}h</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="tabular-nums font-semibold">{t.actualHours}/{t.estimatedHours}h</span>
+                          {t.status === "In Progress" ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                transitionTaskStatus(t.id, "To Do");
+                                toast.success(`Paused task ${t.id}`);
+                              }}
+                              className="p-1 rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 transition cursor-pointer animate-pulse"
+                              title="Pause Task"
+                            >
+                              <Pause className="size-3" />
+                            </button>
+                          ) : (
+                            t.status !== "Done" && t.status !== "Cancelled" && t.type !== "Epic" && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  transitionTaskStatus(t.id, "In Progress");
+                                  toast.success(`Started task ${t.id}`);
+                                }}
+                                className="p-1 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 transition cursor-pointer"
+                                title="Start Task"
+                              >
+                                <Play className="size-3" />
+                              </button>
+                            )
+                          )}
+                        </div>
                         <div
                           className="size-5 rounded-full bg-gradient-to-br from-primary to-accent grid place-items-center text-[7px] font-bold text-white uppercase"
                           title={t.assignee || "Unassigned"}
