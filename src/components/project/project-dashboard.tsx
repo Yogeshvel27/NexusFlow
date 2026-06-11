@@ -428,114 +428,6 @@ export function ProjectDashboard({
 
       </div>
 
-      {/* Member Profile Drawer */}
-      {selectedProfile && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-end">
-          <div onClick={() => setSelectedProfile(null)} className="absolute inset-0 bg-black/60 backdrop-blur-xs" />
-          
-          <div className="relative bg-card border-l border-border h-full w-full max-w-lg shadow-elevated flex flex-col overflow-hidden animate-in slide-in-from-right duration-250">
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-secondary/20">
-              <div className="flex items-center gap-2">
-                <Users className="size-4 text-primary" />
-                <span className="font-bold text-xs uppercase tracking-wider text-muted-foreground">Member Profile</span>
-              </div>
-              <button 
-                onClick={() => setSelectedProfile(null)}
-                className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition cursor-pointer"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-
-            {/* Profile top details */}
-            <div className="px-6 py-5 border-b border-border/60 flex items-center gap-4 bg-secondary/10">
-              <div className="size-14 rounded-full bg-gradient-to-br from-primary to-accent grid place-items-center text-lg font-bold text-white uppercase shrink-0">
-                {selectedProfile.name.split(" ").map((n: string) => n[0]).join("")}
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-base font-bold truncate text-foreground">{selectedProfile.name}</h3>
-                <p className="text-xs text-muted-foreground truncate">{selectedProfile.role || "Team Member"} · {selectedProfile.dept || "General"}</p>
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <StatusChip tone={statusTone(selectedProfile.status || "Available")}>{selectedProfile.status || "Available"}</StatusChip>
-                </div>
-              </div>
-            </div>
-
-            {/* Content Body */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 text-xs">
-              {/* Contact & Basic Info */}
-              <div className="bg-secondary/20 border border-border rounded-xl p-4 space-y-3">
-                <h4 className="font-bold text-[10px] text-muted-foreground uppercase tracking-wider">Contact & Basic Info</h4>
-                <div className="grid grid-cols-2 gap-y-2.5">
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Mail className="size-3" />
-                    Email:
-                  </div>
-                  <div className="font-semibold text-right truncate">
-                    {selectedProfile.email || `${selectedProfile.name.toLowerCase().replace(/\s+/g, ".")}@nexusflow.com`}
-                  </div>
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <User className="size-3" />
-                    Role:
-                  </div>
-                  <div className="font-semibold text-right">{selectedProfile.role || "Team Member"}</div>
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Users className="size-3" />
-                    Department:
-                  </div>
-                  <div className="font-semibold text-right">{selectedProfile.dept || "General"}</div>
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Award className="size-3" />
-                    Utilization:
-                  </div>
-                  <div className="font-semibold text-right">{selectedProfile.util ?? 0}%</div>
-                </div>
-              </div>
-
-              {/* Skills */}
-              <div className="bg-secondary/20 border border-border rounded-xl p-4 space-y-3">
-                <h4 className="font-bold text-[10px] text-muted-foreground uppercase tracking-wider">Skills & Expertise</h4>
-                {selectedProfile.skills && selectedProfile.skills.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedProfile.skills.map((sk: string, i: number) => (
-                      <span key={i} className="px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
-                        {sk}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground italic">No skills listed.</p>
-                )}
-              </div>
-
-              {/* Allocation */}
-              <div className="bg-secondary/20 border border-border rounded-xl p-4 space-y-3">
-                <h4 className="font-bold text-[10px] text-muted-foreground uppercase tracking-wider">Current Allocation</h4>
-                <div className="grid grid-cols-2 gap-y-2.5">
-                  <div className="text-muted-foreground">Allocation:</div>
-                  <div className="font-semibold text-right">{selectedProfile.allocation ?? 0}%</div>
-                  <div className="text-muted-foreground">Status:</div>
-                  <div className="font-semibold text-right">
-                    <StatusChip tone={statusTone(selectedProfile.status || "Available")}>{selectedProfile.status || "Available"}</StatusChip>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Close Action */}
-            <div className="p-6 border-t border-border bg-secondary/5">
-              <button 
-                onClick={() => setSelectedProfile(null)}
-                className="w-full h-9 rounded-xl border border-border hover:bg-secondary text-xs font-semibold cursor-pointer"
-              >
-                Close Profile
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div onClick={() => setIsAddModalOpen(false)} className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" />
@@ -735,6 +627,114 @@ export function ProjectDashboard({
                 className="flex-1 h-9.5 rounded-xl bg-[#C67C4E] text-white font-semibold shadow-sm hover:opacity-90 disabled:opacity-50 transition cursor-pointer text-[11px]"
               >
                 Assign Member
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Member Profile Drawer */}
+      {selectedProfile && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-end">
+          <div onClick={() => setSelectedProfile(null)} className="absolute inset-0 bg-black/60 backdrop-blur-xs" />
+          
+          <div className="relative bg-card border-l border-border h-full w-full max-w-lg shadow-elevated flex flex-col overflow-hidden animate-in slide-in-from-right duration-250">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-secondary/20">
+              <div className="flex items-center gap-2">
+                <Users className="size-4 text-primary" />
+                <span className="font-bold text-xs uppercase tracking-wider text-muted-foreground">Member Profile</span>
+              </div>
+              <button 
+                onClick={() => setSelectedProfile(null)}
+                className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground transition cursor-pointer"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {/* Profile top details */}
+            <div className="px-6 py-5 border-b border-border/60 flex items-center gap-4 bg-secondary/10">
+              <div className="size-14 rounded-full bg-gradient-to-br from-primary to-accent grid place-items-center text-lg font-bold text-white uppercase shrink-0">
+                {selectedProfile.name.split(" ").map((n: string) => n[0]).join("")}
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-bold truncate text-foreground">{selectedProfile.name}</h3>
+                <p className="text-xs text-muted-foreground truncate">{selectedProfile.role || "Team Member"} · {selectedProfile.dept || "General"}</p>
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <StatusChip tone={statusTone(selectedProfile.status || "Available")}>{selectedProfile.status || "Available"}</StatusChip>
+                </div>
+              </div>
+            </div>
+
+            {/* Content Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 text-xs">
+              {/* Contact & Basic Info */}
+              <div className="bg-secondary/20 border border-border rounded-xl p-4 space-y-3">
+                <h4 className="font-bold text-[10px] text-muted-foreground uppercase tracking-wider">Contact & Basic Info</h4>
+                <div className="grid grid-cols-2 gap-y-2.5">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Mail className="size-3" />
+                    Email:
+                  </div>
+                  <div className="font-semibold text-right truncate">
+                    {selectedProfile.email || `${selectedProfile.name.toLowerCase().replace(/\s+/g, ".")}@nexusflow.com`}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <User className="size-3" />
+                    Role:
+                  </div>
+                  <div className="font-semibold text-right">{selectedProfile.role || "Team Member"}</div>
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Users className="size-3" />
+                    Department:
+                  </div>
+                  <div className="font-semibold text-right">{selectedProfile.dept || "General"}</div>
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Award className="size-3" />
+                    Utilization:
+                  </div>
+                  <div className="font-semibold text-right">{selectedProfile.util ?? 0}%</div>
+                </div>
+              </div>
+
+              {/* Skills */}
+              <div className="bg-secondary/20 border border-border rounded-xl p-4 space-y-3">
+                <h4 className="font-bold text-[10px] text-muted-foreground uppercase tracking-wider">Skills & Expertise</h4>
+                {selectedProfile.skills && selectedProfile.skills.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedProfile.skills.map((sk: string, i: number) => (
+                      <span key={i} className="px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
+                        {sk}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground italic">No skills listed.</p>
+                )}
+              </div>
+
+              {/* Allocation */}
+              <div className="bg-secondary/20 border border-border rounded-xl p-4 space-y-3">
+                <h4 className="font-bold text-[10px] text-muted-foreground uppercase tracking-wider">Current Allocation</h4>
+                <div className="grid grid-cols-2 gap-y-2.5">
+                  <div className="text-muted-foreground">Allocation:</div>
+                  <div className="font-semibold text-right">{selectedProfile.allocation ?? 0}%</div>
+                  <div className="text-muted-foreground">Status:</div>
+                  <div className="font-semibold text-right">
+                    <StatusChip tone={statusTone(selectedProfile.status || "Available")}>{selectedProfile.status || "Available"}</StatusChip>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Close Action */}
+            <div className="p-6 border-t border-border bg-secondary/5">
+              <button 
+                onClick={() => setSelectedProfile(null)}
+                className="w-full h-9 rounded-xl border border-border hover:bg-secondary text-xs font-semibold cursor-pointer"
+              >
+                Close Profile
               </button>
             </div>
           </div>

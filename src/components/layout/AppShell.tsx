@@ -11,7 +11,7 @@ import { useWelcomeSpeech } from "@/hooks/useWelcomeSpeech";
 import {
   LayoutDashboard, FolderKanban, Users, CalendarRange, Activity,
   ShieldAlert, FolderOpen, Workflow, BarChart3, Settings,
-  Search, Bell, ChevronRight, LogOut, Plus, User,
+  Search, Bell, ChevronRight, ChevronDown, LogOut, Plus, User,
 } from "lucide-react";
 
 const nav = [
@@ -302,7 +302,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {organization ? (
                 <div 
                   onClick={() => {
-                    setShowOrgDropdown(!showOrgDropdown);
+                    setShowOrgModal(true);
+                    setShowOrgDropdown(false);
                     setShowUserDropdown(false);
                   }}
                   className="flex items-center gap-2 bg-sidebar/90 hover:bg-sidebar border border-sidebar-border rounded-xl p-1.5 pl-2 pr-3 transition cursor-pointer select-none"
@@ -317,8 +318,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   )}
                   
                   {/* Info */}
-                  <div className="text-left">
-                    <div className="text-xs font-semibold leading-tight text-white">{organization.name}</div>
+                  <div className="text-left min-w-0 flex-1 pr-1">
+                    <div className="text-xs font-semibold leading-tight text-white truncate max-w-[100px]">{organization.name}</div>
                     <div className="text-[10px] text-sidebar-foreground/60 leading-tight">
                       {orgRole ? (() => {
                         const r = orgRole.toLowerCase();
@@ -336,6 +337,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     </div>
                   </div>
 
+                  {/* Switch Dropdown Toggle Button */}
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowOrgDropdown(!showOrgDropdown);
+                      setShowUserDropdown(false);
+                    }}
+                    className="p-1 rounded-md hover:bg-sidebar-border text-sidebar-foreground/60 hover:text-white transition-colors"
+                    title="Switch Organization"
+                  >
+                    <ChevronDown className="size-3.5" />
+                  </button>
+
                   {/* Manage Button */}
                   <button 
                     onClick={(e) => {
@@ -343,7 +357,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       setShowOrgModal(true);
                       setShowOrgDropdown(false);
                     }}
-                    className="ml-2 p-1 rounded-md hover:bg-sidebar-border text-sidebar-foreground/60 hover:text-white transition-colors"
+                    className="p-1 rounded-md hover:bg-sidebar-border text-sidebar-foreground/60 hover:text-white transition-colors"
                     title="Manage Organization"
                   >
                     <Settings className="size-3.5" />
