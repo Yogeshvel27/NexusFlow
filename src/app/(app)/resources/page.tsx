@@ -599,12 +599,6 @@ export default function ResourceModule() {
   const { user } = useUser();
   const { orgRole } = useAuth();
   
-  const canAddResource = !orgRole || (
-    orgRole === "org:admin" ||
-    orgRole === "org:resource_managers" ||
-    orgRole === "org:executive_management" ||
-    orgRole === "org:it_administrators"
-  );
   const { projects, updateProjectBudget, resources: dbResources, refreshData } = useWorkspace();
   const [resources, setResources] = useState<Resource[]>([]);
   const [currentPageDirectory, setCurrentPageDirectory] = useState(1);
@@ -717,6 +711,18 @@ export default function ResourceModule() {
     }
     fetchUserRole();
   }, [user]);
+
+  const canAddResource = !orgRole || (
+    orgRole === "org:admin" ||
+    orgRole === "org:resource_managers" ||
+    orgRole === "org:executive_management" ||
+    orgRole === "org:it_administrators"
+  ) || (
+    userRole === "Project Manager" ||
+    userRole === "Resource Manager" ||
+    userRole === "PMO" ||
+    userRole === "Admin"
+  );
 
   const filteredTimesheetProjects = React.useMemo(() => {
     const isAdmin = userRole.toLowerCase().includes("admin");
