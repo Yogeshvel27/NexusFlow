@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import { useAuth } from "@clerk/nextjs";
 import { WorkItem, Project } from "@/lib/store";
 import { TaskTypeIcon } from "@/components/task-type-icon";
 import { resources } from "@/lib/mock";
@@ -20,6 +21,7 @@ import {
   Play,
   Pause
 } from "lucide-react";
+import { TaskTimer } from "./task-timer";
 import { toast } from "sonner";
 
 interface ProjectBacklogProps {
@@ -29,6 +31,14 @@ interface ProjectBacklogProps {
 export function ProjectBacklog({ projectId }: ProjectBacklogProps) {
   const { tasks, updateTask, deleteTask, transitionTaskStatus } = useWorkspace();
   const [selectedTask, setSelectedTask] = useState<WorkItem | null>(null);
+  
+  const { orgRole } = useAuth();
+  const canAddTask = !orgRole || (
+    orgRole === "org:admin" ||
+    orgRole === "org:project_managers" ||
+    orgRole === "org:department_heads" ||
+    orgRole === "org:executive_management"
+  );
 
   // Tree toggle state (collapsed Epic IDs or Task IDs)
   const [collapsedItems, setCollapsedItems] = useState<Record<string, boolean>>({});
@@ -184,7 +194,7 @@ export function ProjectBacklog({ projectId }: ProjectBacklogProps) {
             <span className="w-12 text-right font-medium">{t.priority}</span>
             <span className="w-16 truncate">{t.assignee || <span className="italic text-muted-foreground/60">Unassigned</span>}</span>
             <div className="w-20 flex items-center justify-end gap-1.5">
-              <span className="tabular-nums">{t.actualHours}/{t.estimatedHours}h</span>
+              <TaskTimer task={t} showIcon />
               {t.status === "In Progress" ? (
                 <button
                   onClick={(e) => {
@@ -276,18 +286,34 @@ export function ProjectBacklog({ projectId }: ProjectBacklogProps) {
           </select>
         </div>
 
-        <button
-          onClick={() => {
-            setCreateType("Epic");
-            setCreateParentId(undefined);
-            setCreateStatus("Backlog");
-            setShowCreateModal(true);
-          }}
-          className="h-9 px-3 rounded-lg bg-gradient-to-r from-primary to-accent text-white text-xs font-semibold shadow-copper inline-flex items-center gap-1.5"
-        >
-          <Plus className="size-4" />
-          New Epic
-        </button>
+        {canAddTask && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setCreateType("Task");
+                setCreateParentId(undefined);
+                setCreateStatus("Backlog");
+                setShowCreateModal(true);
+              }}
+              className="h-9 px-3 rounded-lg border border-primary text-primary hover:bg-primary/5 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition"
+            >
+              <Plus className="size-4" />
+              Add Task
+            </button>
+            <button
+              onClick={() => {
+                setCreateType("Epic");
+                setCreateParentId(undefined);
+                setCreateStatus("Backlog");
+                setShowCreateModal(true);
+              }}
+              className="h-9 px-3 rounded-lg bg-gradient-to-r from-primary to-accent text-white text-xs font-semibold shadow-copper inline-flex items-center gap-1.5 cursor-pointer transition"
+            >
+              <Plus className="size-4" />
+              New Epic
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main List */}
@@ -353,19 +379,20 @@ export function ProjectBacklog({ projectId }: ProjectBacklogProps) {
                     <span className="w-16 truncate">{epic.assignee || <span className="italic">Unassigned</span>}</span>
                     <span className="w-12 text-right tabular-nums">-{epic.estimatedHours}h</span>
                     
-                    {/* Add task to Epic button */}
-                    <button
-                      onClick={() => {
-                        setCreateType("Task");
-                        setCreateParentId(epic.id);
-                        setCreateStatus("To Do");
-                        setShowCreateModal(true);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-secondary rounded text-primary transition"
-                      title="Add task to Epic"
-                    >
-                      <Plus className="size-3.5" />
-                    </button>
+                    {canAddTask && (
+                      <button
+                        onClick={() => {
+                          setCreateType("Task");
+                          setCreateParentId(epic.id);
+                          setCreateStatus("To Do");
+                          setShowCreateModal(true);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-secondary rounded text-primary transition"
+                        title="Add task to Epic"
+                      >
+                        <Plus className="size-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
 

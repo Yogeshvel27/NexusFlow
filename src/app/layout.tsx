@@ -167,7 +167,7 @@ export default function RootLayout({
 }) {
   return (
     <ClerkProvider appearance={clerkAppearance}>
-      <html lang="en">
+      <html lang="en" suppressHydrationWarning>
         <head>
           <link rel="preconnect" href="https://fonts.googleapis.com" />
           <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -176,7 +176,7 @@ export default function RootLayout({
             rel="stylesheet"
           />
         </head>
-        <body>
+        <body suppressHydrationWarning>
           <WorkspaceProvider>
             {children}
           </WorkspaceProvider>

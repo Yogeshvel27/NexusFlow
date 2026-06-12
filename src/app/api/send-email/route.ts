@@ -392,6 +392,58 @@ export async function POST(req: Request) {
         categoryLabel: "Task Specifications"
       });
 
+    } else if (notificationType === "allocation") {
+      subject = `[NexusFlow] Resource Allocation: ${employeeName || "Resource"} allocated to ${projectName || "Project"}`;
+
+      const detailsHtml = `
+        <tr>
+          <td class="details-label">Resource Name</td>
+          <td class="details-value">${employeeName || "Not Specified"}</td>
+        </tr>
+        <tr>
+          <td class="details-label">Project Name</td>
+          <td class="details-value">${projectName || "Not Specified"}</td>
+        </tr>
+        <tr>
+          <td class="details-label">Project Manager</td>
+          <td class="details-value">${projectManager || "Not Specified"}</td>
+        </tr>
+        <tr>
+          <td class="details-label">Assigned Role</td>
+          <td class="details-value">${projectRole || "Resource"}</td>
+        </tr>
+      `;
+
+      const focusItemsHtml = `
+        <div class="section-title">Allocation Focus</div>
+        <div class="focus-section">
+          <div class="focus-card">
+            <div class="focus-title">System Status</div>
+            <p class="focus-desc">For this project the resource is allocated and provisioned successfully in the NexusFlow directory.</p>
+          </div>
+          <div class="focus-card">
+            <div class="focus-title">Access Configuration</div>
+            <p class="focus-desc">Ensure the allocated resource is granted appropriate folder permissions, repository access, and workspace privileges.</p>
+          </div>
+        </div>
+      `;
+
+      const actionButtonsHtml = `
+        <a href="${appUrl}/resources" class="btn">View Resource Directory</a>
+        <a href="${appUrl}/projects" class="btn btn-secondary">View Project Workspace</a>
+      `;
+
+      htmlContent = renderEmailShell({
+        bannerTitle: "Resource Allocation Alert",
+        subjectTitle: subject,
+        greeting: `Hello Admin,`,
+        introText: `A resource has been newly allocated to a project workspace:`,
+        detailsHtml,
+        focusItemsHtml,
+        actionButtonsHtml,
+        categoryLabel: "Allocation Specifications"
+      });
+
     } else {
       // ----------------------------------------------------
       // PROJECT NOTIFICATION - ROLE-BASED RENDERING PIPELINE

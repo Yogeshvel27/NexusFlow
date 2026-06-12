@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 import {
   X,
   ClipboardList,
@@ -36,8 +37,9 @@ import {
 } from "lucide-react";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { WorkItem } from "@/lib/store";
-import { resources } from "@/lib/mock";
+import { resources as mockResources } from "@/lib/mock";
 import { toast } from "sonner";
+import { useOrganization, useUser } from "@clerk/nextjs";
 
 const statusesMeta = [
   { id: "Backlog", label: "Backlog", color: "bg-stone-400" },
@@ -66,7 +68,110 @@ export function CreateTaskModal({
   defaultType = "Task",
   onClose
 }: CreateTaskModalProps) {
-  const { createTask, addAttachmentToTask } = useWorkspace();
+  const { createTask, addAttachmentToTask, projects, users } = useWorkspace();
+  const { user } = useUser();
+
+  const [dbResources, setDbResources] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function loadDbResources() {
+      try {
+        const { data, error } = await supabase.from("resources").select("*");
+        if (data && !error) {
+          const mapped = data.map(r => ({
+            id: r.id,
+            name: r.name,
+            email: r.email,
+            phone: r.phone,
+            role: r.role || "Member",
+            dept: r.dept || "Engineering",
+            skills: typeof r.skills === "string" ? JSON.parse(r.skills) : (r.skills || []),
+            status: r.status || "Available",
+            util: Number(r.utilization_rate || 0),
+            allocation: 0
+          }));
+          setDbResources(mapped);
+        } else {
+          const saved = localStorage.getItem("nexus_resources_v2");
+          if (saved) {
+            setDbResources(JSON.parse(saved));
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load db resources:", err);
+      }
+    }
+    loadDbResources();
+  }, []);
+
+  const allResources = React.useMemo(() => {
+    const baseList = dbResources.length > 0 ? [...dbResources] : [...mockResources];
+    const list: any[] = [...baseList];
+    if (user) {
+      const name = user.fullName || [user.firstName, user.lastName].filter(Boolean).join(" ") || user.primaryEmailAddress?.emailAddress || "Current User";
+      const email = user.primaryEmailAddress?.emailAddress || "";
+      if (!list.some(r => r.name.toLowerCase() === name.toLowerCase())) {
+        list.push({
+          id: user.id,
+          name: name,
+          email: email,
+          role: "Member",
+          dept: "Engineering",
+          skills: [],
+          status: "Available",
+          util: 0,
+          allocation: 0
+        });
+      }
+    }
+    return list.filter(r => {
+      const roleLower = (r.role || "").toLowerCase();
+      const nameLower = (r.name || "").toLowerCase();
+      return !roleLower.includes("admin") && !nameLower.includes("admin");
+    });
+  }, [dbResources, user]);
+
+  const projectTeamMembers = React.useMemo(() => {
+    const currentProject = projects.find(p => p.id === projectId);
+    const teamNames = currentProject?.teamMembers || [];
+    const pmName = currentProject?.projectManager;
+
+    const filtered = allResources.filter(r => {
+      return teamNames.some(tName => tName.toLowerCase().trim() === r.name.toLowerCase().trim()) || 
+             (pmName && pmName.toLowerCase().trim() === r.name.toLowerCase().trim());
+    });
+
+    return filtered.length > 0 ? filtered : allResources;
+  }, [allResources, projects, projectId]);
+
+  const triggerTaskEmail = (createdTask: WorkItem) => {
+    if (!createdTask.assignee) return;
+
+    const resource = allResources.find(r => r.name === createdTask.assignee);
+    const email = resource?.email || `${createdTask.assignee.toLowerCase().replace(/\s+/g, ".")}@nexusflow.com`;
+    const currentProject = projects.find(p => p.id === createdTask.projectId);
+    const projectName = currentProject?.name || "Project Workspace";
+
+    fetch("/api/send-email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: email,
+        employeeName: createdTask.assignee,
+        projectName: projectName,
+        notificationType: "task",
+        taskTitle: createdTask.title,
+        duration: createdTask.estimatedHours,
+        priority: createdTask.priority,
+        taskType: createdTask.type,
+        taskCode: createdTask.id
+      })
+    }).catch(err => {
+      console.error("Failed to send task email:", err);
+    });
+  };
 
   // Form states
   const [title, setTitle] = useState("");
@@ -114,14 +219,19 @@ export function CreateTaskModal({
       tags: labels
     });
 
-    if (createdTask && attachments.length > 0) {
-      attachments.forEach(att => {
-        addAttachmentToTask(createdTask.id, {
-          name: att.name,
-          size: att.size,
-          url: "#"
+    if (createdTask) {
+      if (attachments.length > 0) {
+        attachments.forEach(att => {
+          addAttachmentToTask(createdTask.id, {
+            name: att.name,
+            size: att.size,
+            url: "#"
+          });
         });
-      });
+      }
+      if (createdTask.assignee) {
+        triggerTaskEmail(createdTask);
+      }
     }
 
     toast.success(`Task ${title} created successfully.`);
@@ -311,8 +421,8 @@ export function CreateTaskModal({
                   className="w-full h-8.5 px-2.5 rounded-lg bg-secondary/50 border border-border focus:outline-none focus:ring-1 focus:ring-primary text-xs cursor-pointer"
                 >
                   <option value="">Search or select member</option>
-                  {resources.map(r => (
-                    <option key={r.id} value={r.name}>{r.name} ({r.role})</option>
+                  {projectTeamMembers.map(r => (
+                    <option key={r.id} value={r.name}>{r.name} ({r.role || "Member"})</option>
                   ))}
                 </select>
               </div>

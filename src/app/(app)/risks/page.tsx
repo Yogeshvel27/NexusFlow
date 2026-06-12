@@ -33,7 +33,7 @@ const impLabels = ["Insignif.", "Minor", "Moderate", "Major", "Severe"];
 function Risks() {
   const { orgRole } = useAuth();
   const { user } = useUser();
-  const { projects, tasks } = useWorkspace();
+  const { projects, tasks, risks: dbRisks, refreshData } = useWorkspace();
   
   const isMember = orgRole === "org:member";
   
@@ -91,121 +91,105 @@ function Risks() {
     }
   }, [isAddModalOpen, loggableProjects, formProject]);
 
-  // Load state from Supabase, with local storage fallback
+  // Initialize and keep local state in sync with context cache
   useEffect(() => {
-    async function loadRisks() {
-      try {
-        const { data, error } = await supabase.from("risks").select("*");
-        
-        let currentRisks: Risk[] = [];
-        if (error || !data || data.length === 0) {
-          const saved = localStorage.getItem("nexus_risks_v2");
-          if (saved) {
-            currentRisks = JSON.parse(saved);
-          } else {
-            currentRisks = initializeDefaultRisks();
-          }
-        } else {
-          currentRisks = data.map(r => ({
-            id: r.id,
-            name: r.name,
-            project: r.project,
-            severity: r.severity,
-            probability: r.probability,
-            impact: r.impact,
-            owner: r.owner,
-            status: r.status,
-            source: r.source,
-            description: r.description,
-            createdAt: r.created_at
-          }));
-        }
+    if (dbRisks && dbRisks.length > 0) {
+      let currentRisks = dbRisks.map(r => ({
+        id: r.id,
+        name: r.name,
+        project: r.project,
+        severity: r.severity,
+        probability: r.probability,
+        impact: r.impact,
+        owner: r.owner,
+        status: r.status,
+        source: r.source,
+        description: r.description,
+        createdAt: r.created_at || r.createdAt
+      }));
 
-        // Proactively scan resources from directory state for overallocated constraints
-        const savedResources = localStorage.getItem("nexus_resources_v2");
-        if (savedResources) {
-          try {
-            const resourcesList = JSON.parse(savedResources);
-            const newlyDetected: Risk[] = [];
-            let hasUpdates = false;
+      // Proactively scan resources from directory state for overallocated constraints
+      const savedResources = localStorage.getItem("nexus_resources_v2");
+      if (savedResources) {
+        try {
+          const resourcesList = JSON.parse(savedResources);
+          const newlyDetected: Risk[] = [];
+          let hasUpdates = false;
 
-            resourcesList.forEach((res: any) => {
-              const totalLoadPercent = res.allocations?.reduce((sum: number, a: any) => sum + (a.allocationPercent || 0), 0) || 0;
-              if (totalLoadPercent > 100) {
-                const riskName = `${res.name} Overallocated Capacity`;
-                // Check for active (non-Closed) risk
-                const existingIndex = currentRisks.findIndex(r => r.name === riskName && r.status !== "Closed");
-                if (existingIndex === -1) {
-                  newlyDetected.push({
-                    id: `RSK-AUTO-${Math.floor(100 + Math.random() * 900)}`,
-                    name: riskName,
-                    project: res.allocations?.[0]?.projectName || "Atlas Banking Platform",
-                    severity: "High",
-                    probability: "Certain",
-                    impact: "Major",
-                    owner: res.name,
-                    status: "Identified",
-                    source: "Automated",
-                    description: `Automated Capacity Listener detected total workload allocation is ${totalLoadPercent}% exceeding the 100% standard capacity limit.`,
-                    createdAt: new Date().toISOString().split("T")[0]
-                  });
-                } else {
-                  // Update load description text dynamically if capacity percentages change
-                  const existing = currentRisks[existingIndex];
-                  const matchText = `${totalLoadPercent}%`;
-                  if (!existing.description.includes(matchText)) {
-                    currentRisks[existingIndex] = {
-                      ...existing,
-                      description: `Automated Capacity Listener detected total workload allocation is ${totalLoadPercent}% exceeding the 100% standard capacity limit.`
-                    };
-                    hasUpdates = true;
-                  }
+          resourcesList.forEach((res: any) => {
+            const totalLoadPercent = res.allocations?.reduce((sum: number, a: any) => sum + (a.allocationPercent || 0), 0) || 0;
+            if (totalLoadPercent > 100) {
+              const riskName = `${res.name} Overallocated Capacity`;
+              // Check for active (non-Closed) risk
+              const existingIndex = currentRisks.findIndex(r => r.name === riskName && r.status !== "Closed");
+              if (existingIndex === -1) {
+                newlyDetected.push({
+                  id: `RSK-AUTO-${Math.floor(100 + Math.random() * 900)}`,
+                  name: riskName,
+                  project: res.allocations?.[0]?.projectName || "Atlas Banking Platform",
+                  severity: "High",
+                  probability: "Certain",
+                  impact: "Major",
+                  owner: res.name,
+                  status: "Identified",
+                  source: "Automated",
+                  description: `Automated Capacity Listener detected total workload allocation is ${totalLoadPercent}% exceeding the 100% standard capacity limit.`,
+                  createdAt: new Date().toISOString().split("T")[0]
+                });
+              } else {
+                // Update load description text dynamically if capacity percentages change
+                const existing = currentRisks[existingIndex];
+                const matchText = `${totalLoadPercent}%`;
+                if (!existing.description.includes(matchText)) {
+                  currentRisks[existingIndex] = {
+                    ...existing,
+                    description: `Automated Capacity Listener detected total workload allocation is ${totalLoadPercent}% exceeding the 100% standard capacity limit.`
+                  };
+                  hasUpdates = true;
                 }
               }
-            });
-
-            if (newlyDetected.length > 0) {
-              currentRisks = [...newlyDetected, ...currentRisks];
-              hasUpdates = true;
             }
+          });
 
-            if (hasUpdates) {
-              localStorage.setItem("nexus_risks_v2", JSON.stringify(currentRisks));
-              // Try to upsert newly scanned risks to database
-              const rows = currentRisks.map(r => ({
-                id: r.id,
-                name: r.name,
-                project: r.project,
-                severity: r.severity,
-                probability: r.probability,
-                impact: r.impact,
-                owner: r.owner,
-                status: r.status,
-                source: r.source,
-                description: r.description,
-                created_at: r.createdAt
-              }));
-              await supabase.from("risks").upsert(rows);
-            }
-          } catch (err) {
-            console.error("Failed to parse resources for active risks", err);
+          if (newlyDetected.length > 0) {
+            currentRisks = [...newlyDetected, ...currentRisks];
+            hasUpdates = true;
           }
-        }
 
-        setRisks(currentRisks);
-      } catch (err) {
-        console.error("Failed to load risks from Supabase:", err);
-        const saved = localStorage.getItem("nexus_risks_v2");
-        if (saved) {
-          setRisks(JSON.parse(saved));
-        } else {
-          setRisks(initializeDefaultRisks());
+          if (hasUpdates) {
+            localStorage.setItem("nexus_risks_v2", JSON.stringify(currentRisks));
+            const rows = currentRisks.map(r => ({
+              id: r.id,
+              name: r.name,
+              project: r.project,
+              severity: r.severity,
+              probability: r.probability,
+              impact: r.impact,
+              owner: r.owner,
+              status: r.status,
+              source: r.source,
+              description: r.description,
+              created_at: r.createdAt
+            }));
+            supabase.from("risks").upsert(rows).then(() => {
+              refreshData();
+            });
+          }
+        } catch (err) {
+          console.error("Failed to parse resources for active risks", err);
         }
       }
-    }
 
-    loadRisks();
-  }, []);
+      setRisks(currentRisks);
+    } else {
+      const saved = localStorage.getItem("nexus_risks_v2");
+      if (saved) {
+        setRisks(JSON.parse(saved));
+      } else {
+        setRisks(initializeDefaultRisks());
+      }
+    }
+  }, [dbRisks]);
 
   const initializeDefaultRisks = (): Risk[] => {
     const formatted: Risk[] = initialRisks.map((r, index) => {
@@ -260,7 +244,7 @@ function Risks() {
     setRisks(updated);
     localStorage.setItem("nexus_risks_v2", JSON.stringify(updated));
 
-    try {
+    const syncPromise = (async () => {
       const rows = updated.map(r => ({
         id: r.id,
         name: r.name,
@@ -275,10 +259,18 @@ function Risks() {
         created_at: r.createdAt
       }));
 
-      await supabase.from("risks").upsert(rows);
-    } catch (err) {
-      console.error("Failed to upsert risks in Supabase:", err);
-    }
+      const { error } = await supabase.from("risks").upsert(rows);
+      if (error) {
+        throw error;
+      }
+      await refreshData();
+    })();
+
+    toast.promise(syncPromise, {
+      loading: "Saving risk register changes...",
+      success: "Risk register saved and synchronized!",
+      error: (err) => `Database sync failed: ${err.message || String(err)}`
+    });
   };
 
   // Severity tone helper

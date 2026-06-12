@@ -7,7 +7,7 @@ import {
   MoreHorizontal, Check, Shield, UserCheck, DollarSign,
   Building2, BarChart2, User, Loader2, Calendar, Award, UserPlus
 } from "lucide-react";
-
+import { supabase } from "@/lib/supabase";
 const ROLES = [
   { key: "org:admin", label: "Admin", icon: Shield },
   { key: "org:resource_managers", label: "Resource Manager", icon: UserCheck },
@@ -32,10 +32,11 @@ const fmtDate = (d: any) =>
 interface Props { open: boolean; onClose: () => void; }
 
 export function OrganizationModal({ open, onClose }: Props) {
-  const { organization, membership, memberships, isLoaded } = useOrganization({
-    memberships: { limit: 50, infinite: false },
-  });
+  const { organization, membership, isLoaded } = useOrganization();
   const { user } = useUser();
+
+  const isAdmin = membership?.role === "org:admin";
+  const canInvite = !!(membership?.role && membership.role !== "org:member");
 
   const [tab, setTab] = useState<"members" | "invitations">("members");
   const [nav, setNav] = useState<"general" | "members">("members");
@@ -49,13 +50,44 @@ export function OrganizationModal({ open, onClose }: Props) {
   const [invitations, setInvitations] = useState<any[]>([]);
   const [actOpen, setActOpen] = useState<string | null>(null);
   const [mRoleOpen, setMRoleOpen] = useState<string | null>(null);
+  const [dbMembers, setDbMembers] = useState<any[]>([]);
 
   const roleTriggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (!open || !organization) return;
+    if (!open) return;
+    if (isAdmin) {
+      if (organization) {
+        organization.getMemberships({ pageSize: 50 }).then((res) => {
+          setDbMembers(res.data ?? []);
+        }).catch((e) => {
+          console.warn("Failed to fetch memberships in OrganizationModal:", e);
+        });
+      }
+    } else {
+      supabase.from("resources").select("*").then(({ data, error }) => {
+        if (data && !error) {
+          const mapped = data.map(r => ({
+            id: r.id,
+            role: r.role || "org:member",
+            publicUserData: {
+              userId: r.id,
+              firstName: r.name.split(" ")[0] || "",
+              lastName: r.name.split(" ").slice(1).join(" ") || "",
+              identifier: r.email,
+              imageUrl: null
+            }
+          }));
+          setDbMembers(mapped);
+        }
+      });
+    }
+  }, [open, organization, isAdmin]);
+
+  useEffect(() => {
+    if (!open || !organization || !isAdmin) return;
     organization.getInvitations().then((r) => setInvitations(r.data ?? [])).catch(() => {});
-  }, [open, organization]);
+  }, [open, organization, isAdmin]);
 
   useEffect(() => {
     if (!open) return;
@@ -74,10 +106,7 @@ export function OrganizationModal({ open, onClose }: Props) {
 
   if (!open) return null;
 
-  const isAdmin = membership?.role === "org:admin";
-  const canInvite = !!(membership?.role && membership.role !== "org:member");
-
-  const members = ((memberships?.data ?? []) as any[]).filter((m: any) => {
+  const members = dbMembers.filter((m: any) => {
     if (!search) return true;
     const n = (m.publicUserData?.firstName ?? "") + " " + (m.publicUserData?.lastName ?? "");
     const e = m.publicUserData?.identifier ?? "";
@@ -90,7 +119,7 @@ export function OrganizationModal({ open, onClose }: Props) {
   const selectedRole = ROLES.find((r) => r.key === role) ?? ROLES[ROLES.length - 1];
   const SelectedIcon = selectedRole.icon;
 
-  const adminMember = memberships?.data?.find((m: any) => m.role === "org:admin");
+  const adminMember = dbMembers.find((m: any) => m.role === "org:admin");
   const adminName = adminMember
     ? [adminMember.publicUserData?.firstName, adminMember.publicUserData?.lastName].filter(Boolean).join(" ") || adminMember.publicUserData?.identifier
     : "Organization Admin";
@@ -137,13 +166,21 @@ export function OrganizationModal({ open, onClose }: Props) {
 
   async function updateRole(userId: string, r: string) {
     if (!organization) return;
-    try { await organization.updateMember({ userId, role: r }); } catch {}
+    try { 
+      await organization.updateMember({ userId, role: r }); 
+      const res = await organization.getMemberships({ pageSize: 50 });
+      setDbMembers(res.data ?? []);
+    } catch {}
     setMRoleOpen(null);
   }
 
   async function removeMember(userId: string) {
     if (!organization) return;
-    try { await organization.removeMember(userId); } catch {}
+    try { 
+      await organization.removeMember(userId); 
+      const res = await organization.getMemberships({ pageSize: 50 });
+      setDbMembers(res.data ?? []);
+    } catch {}
     setActOpen(null);
   }
 
@@ -287,7 +324,7 @@ export function OrganizationModal({ open, onClose }: Props) {
                           color: tab === t ? S.gold : S.muted,
                         }}
                       >
-                        {t === "members" ? (memberships?.data?.length ?? 0) : invitations.length}
+                        {t === "members" ? dbMembers.length : invitations.length}
                       </span>
                     </button>
                   ))}
@@ -547,7 +584,7 @@ export function OrganizationModal({ open, onClose }: Props) {
                   style={{ borderTop: "1px solid rgba(255,255,255,0.06)", color: S.muted }}
                 >
                   <Users className="size-3.5" />
-                  <span className="text-xs">{memberships?.data?.length ?? 0} of 5 seats used</span>
+                  <span className="text-xs">{dbMembers.length} of 5 seats used</span>
                 </div>
               </div>
             </>

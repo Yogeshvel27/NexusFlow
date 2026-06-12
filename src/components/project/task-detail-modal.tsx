@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { X, Send, Paperclip, Clock, Shield, AlertTriangle, Trash, Play, Pause } from "lucide-react";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { WorkItem, validateTaskTransition } from "@/lib/store";
 import { TaskTypeIcon } from "@/components/task-type-icon";
 import { resources as mockResources } from "@/lib/mock";
 import { toast } from "sonner";
+import { TaskTimer } from "./task-timer";
 import { supabase } from "@/lib/supabase";
 import { useOrganization, useUser } from "@clerk/nextjs";
 
@@ -17,24 +18,46 @@ interface TaskDetailModalProps {
 
 export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const { projects, users, updateTask, deleteTask, addCommentToTask, addAttachmentToTask, removeAttachmentFromTask, transitionTaskStatus } = useWorkspace();
-  const { memberships } = useOrganization({
-    memberships: { pageSize: 50 }
-  });
   const { user } = useUser();
   const [commentText, setCommentText] = useState("");
   const [editing, setEditing] = useState(false);
 
+  const [dbResources, setDbResources] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function loadDbResources() {
+      try {
+        const { data, error } = await supabase.from("resources").select("*");
+        if (data && !error) {
+          const mapped = data.map(r => ({
+            id: r.id,
+            name: r.name,
+            email: r.email,
+            phone: r.phone,
+            role: r.role || "Member",
+            dept: r.dept || "Engineering",
+            skills: typeof r.skills === "string" ? JSON.parse(r.skills) : (r.skills || []),
+            status: r.status || "Available",
+            util: Number(r.utilization_rate || 0),
+            allocation: 0
+          }));
+          setDbResources(mapped);
+        } else {
+          const saved = localStorage.getItem("nexus_resources_v2");
+          if (saved) {
+            setDbResources(JSON.parse(saved));
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load db resources:", err);
+      }
+    }
+    loadDbResources();
+  }, []);
+
   // Compute all available resources including Clerk members
   const allResources = React.useMemo(() => {
-    const baseList = users && users.length > 0
-      ? users.map(u => ({
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          role: u.role || "Member",
-          dept: "Engineering"
-        }))
-      : mockResources;
+    const baseList = dbResources.length > 0 ? [...dbResources] : [...mockResources];
     const list: any[] = [...baseList];
     if (user) {
       const name = user.fullName || [user.firstName, user.lastName].filter(Boolean).join(" ") || user.primaryEmailAddress?.emailAddress || "Current User";
@@ -53,30 +76,25 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
         });
       }
     }
-    if (memberships?.data) {
-      memberships.data.forEach((m: any) => {
-        const name = [m.publicUserData?.firstName, m.publicUserData?.lastName].filter(Boolean).join(" ") || m.publicUserData?.identifier || "Unknown";
-        if (!list.some(r => r.name.toLowerCase() === name.toLowerCase())) {
-          list.push({
-            id: m.publicUserData?.userId || m.id,
-            name: name,
-            email: m.publicUserData?.identifier,
-            role: "Member",
-            dept: "Engineering",
-            skills: [],
-            status: "Available",
-            util: 0,
-            allocation: 0
-          });
-        }
-      });
-    }
     return list.filter(r => {
       const roleLower = (r.role || "").toLowerCase();
       const nameLower = (r.name || "").toLowerCase();
       return !roleLower.includes("admin") && !nameLower.includes("admin");
     });
-  }, [memberships?.data, user, users]);
+  }, [dbResources, user]);
+
+  const projectTeamMembers = React.useMemo(() => {
+    const currentProject = projects.find(p => p.id === task.projectId);
+    const teamNames = currentProject?.teamMembers || [];
+    const pmName = currentProject?.projectManager;
+
+    const filtered = allResources.filter(r => {
+      return teamNames.some(tName => tName.toLowerCase().trim() === r.name.toLowerCase().trim()) || 
+             (pmName && pmName.toLowerCase().trim() === r.name.toLowerCase().trim());
+    });
+
+    return filtered.length > 0 ? filtered : allResources;
+  }, [allResources, projects, task.projectId]);
 
   // Form State
   const [title, setTitle] = useState(task.title);
@@ -453,7 +471,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                   className="col-span-2 h-8 px-2 rounded-lg bg-secondary border border-border"
                 >
                   <option value="">Unassigned</option>
-                  {allResources.map(r => (
+                  {projectTeamMembers.map(r => (
                     <option key={r.id} value={r.name}>{r.name} ({r.dept || "Engineering"})</option>
                   ))}
                 </select>
@@ -470,7 +488,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                   className="col-span-2 h-8 px-2 rounded-lg bg-secondary border border-border"
                 >
                   <option value="">None</option>
-                  {allResources.map(r => (
+                  {projectTeamMembers.map(r => (
                     <option key={r.id} value={r.name}>{r.name}</option>
                   ))}
                 </select>
@@ -517,11 +535,75 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                   type="number"
                   value={actualHours}
                   onChange={(e) => {
-                    setActualHours(Number(e.target.value));
-                    updateTask(task.id, { actualHours: Number(e.target.value) });
+                    const newHrs = Number(e.target.value);
+                    setActualHours(newHrs);
+                    
+                    // Also recalculate delay & score based on manual edit
+                    let nextIsDelayed = task.isDelayed;
+                    let nextPerformanceScore = task.performanceScore;
+                    if (task.estimatedHours && task.estimatedHours > 0) {
+                      if (newHrs > task.estimatedHours) {
+                        nextIsDelayed = true;
+                        const ratio = task.estimatedHours / newHrs;
+                        nextPerformanceScore = Math.max(30, Math.round(90 * ratio));
+                      } else {
+                        const ratio = newHrs / task.estimatedHours;
+                        if (ratio <= 0.5) {
+                          nextPerformanceScore = 100;
+                        } else {
+                          nextPerformanceScore = Math.round(90 + 10 * (1 - (ratio - 0.5) / 0.5));
+                        }
+                      }
+                    }
+                    updateTask(task.id, { 
+                      actualHours: newHrs, 
+                      isDelayed: nextIsDelayed, 
+                      performanceScore: nextPerformanceScore 
+                    });
                   }}
                   className="col-span-2 h-8 px-2 rounded-lg bg-secondary border border-border"
                 />
+              </div>
+
+              <div className="grid grid-cols-3 items-center">
+                <span className="text-muted-foreground">Live Tracked</span>
+                <div className="col-span-2 py-1 px-2 bg-secondary/40 rounded-lg">
+                  <TaskTimer task={task} showIcon />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 items-center">
+                <span className="text-muted-foreground">Status</span>
+                <div className="col-span-2">
+                  {task.isDelayed ? (
+                    <span className="px-2 py-0.5 rounded bg-red-500/10 text-red-500 border border-red-500/20 font-bold uppercase text-[9px] inline-flex items-center gap-1 animate-pulse">
+                      <AlertTriangle className="size-3 text-red-500" /> Delayed Task
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-bold uppercase text-[9px] inline-flex items-center">
+                      On Schedule
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 items-center">
+                <span className="text-muted-foreground">Perf. Score</span>
+                <div className="col-span-2">
+                  {task.performanceScore !== undefined ? (
+                    <span className={`font-bold py-1 px-2.5 rounded-lg border text-[11px] ${
+                      task.performanceScore >= 80 
+                        ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" 
+                        : task.performanceScore >= 60
+                        ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                        : "bg-red-500/10 text-red-500 border-red-500/20"
+                    }`}>
+                      {task.performanceScore}/100
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic text-[11px]">Not evaluated</span>
+                  )}
+                </div>
               </div>
             </div>
 

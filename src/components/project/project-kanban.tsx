@@ -2,12 +2,14 @@
 
 import React, { useState } from "react";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import { useUser, useAuth } from "@clerk/nextjs";
 import { WorkItem, validateTaskTransition } from "@/lib/store";
 import { TaskTypeIcon } from "@/components/task-type-icon";
 import { resources } from "@/lib/mock";
 import { TaskDetailModal } from "./task-detail-modal";
 import { CreateTaskModal } from "./create-task-modal";
 import { AlertCircle, RotateCcw, Ban, Sparkles, Plus, Play, Pause } from "lucide-react";
+import { TaskTimer } from "./task-timer";
 import { toast } from "sonner";
 
 interface ProjectKanbanProps {
@@ -26,6 +28,37 @@ const COLUMNS: { id: string; label: string; statuses: WorkItem['status'][] }[] =
 export function ProjectKanban({ projectId }: ProjectKanbanProps) {
   const { tasks, transitionTaskStatus } = useWorkspace();
   const [selectedTask, setSelectedTask] = useState<WorkItem | null>(null);
+
+  const { user } = useUser();
+  const { orgRole } = useAuth();
+  const canAddTask = !orgRole || (
+    orgRole === "org:admin" ||
+    orgRole === "org:project_managers" ||
+    orgRole === "org:department_heads" ||
+    orgRole === "org:executive_management"
+  );
+  const currentUserName = user
+    ? user.fullName || [user.firstName, user.lastName].filter(Boolean).join(" ")
+    : "";
+
+  const myTasks = tasks.filter(t =>
+    t.projectId === projectId &&
+    t.assignee &&
+    currentUserName &&
+    t.assignee.toLowerCase() === currentUserName.toLowerCase() &&
+    t.status !== "Done" &&
+    t.status !== "Cancelled"
+  );
+
+  const activeTask = tasks.find(t =>
+    t.status === "In Progress" &&
+    t.timerStartedAt &&
+    t.assignee &&
+    currentUserName &&
+    t.assignee.toLowerCase() === currentUserName.toLowerCase()
+  );
+
+  const [showStartDropdown, setShowStartDropdown] = useState(false);
   
   // Create task modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -123,6 +156,73 @@ export function ProjectKanban({ projectId }: ProjectKanbanProps) {
             <option key={t} value={t}>{t}</option>
           ))}
         </select>
+
+        {/* Start / Pause Task Button */}
+        <div className="relative">
+          {activeTask ? (
+            <button
+              onClick={() => {
+                transitionTaskStatus(activeTask.id, "To Do");
+                toast.success(`Paused task ${activeTask.id}`);
+              }}
+              className="h-9 px-3 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer shadow-sm animate-pulse"
+              title="Pause current active task"
+            >
+              <Pause className="size-3.5" />
+              <span>Pause {activeTask.id}</span>
+            </button>
+          ) : (
+            <div className="relative">
+              <button
+                onClick={() => setShowStartDropdown(!showStartDropdown)}
+                className="h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                title="Select and start a task"
+              >
+                <Play className="size-3.5" />
+                <span>Start Task</span>
+              </button>
+
+              {showStartDropdown && (
+                <>
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setShowStartDropdown(false)}
+                  />
+                  <div className="absolute left-0 mt-1.5 w-64 bg-card border border-border rounded-xl shadow-elevated z-20 py-1.5 max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-1 duration-150">
+                    <div className="px-3 py-1 text-[10px] font-bold text-muted-foreground uppercase tracking-wider border-b border-border/40 pb-1.5 mb-1">
+                      Assigned to you ({myTasks.length})
+                    </div>
+                    {myTasks.length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-muted-foreground italic">
+                        No active tasks assigned to you
+                      </div>
+                    ) : (
+                      myTasks.map(t => (
+                        <button
+                          key={t.id}
+                          onClick={() => {
+                            transitionTaskStatus(t.id, "In Progress");
+                            toast.success(`Started task ${t.id}`);
+                            setShowStartDropdown(false);
+                          }}
+                          className="w-full px-3 py-2 text-left hover:bg-secondary/60 text-xs flex flex-col gap-0.5 transition"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-primary">{t.id}</span>
+                            <span className="text-[9px] uppercase font-bold text-muted-foreground bg-secondary px-1 py-0.2 rounded">
+                              {t.status}
+                            </span>
+                          </div>
+                          <span className="text-foreground/80 truncate font-medium">{t.title}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Kanban Board columns wrapper */}
@@ -207,7 +307,7 @@ export function ProjectKanban({ projectId }: ProjectKanbanProps) {
                       {/* Footer: Assignee & Hours */}
                       <div className="mt-3 pt-2 border-t border-border/30 flex items-center justify-between text-[10px] text-muted-foreground">
                         <div className="flex items-center gap-1.5">
-                          <span className="tabular-nums font-semibold">{t.actualHours}/{t.estimatedHours}h</span>
+                          <TaskTimer task={t} showIcon />
                           {t.status === "In Progress" ? (
                             <button
                               onClick={(e) => {
@@ -278,18 +378,20 @@ export function ProjectKanban({ projectId }: ProjectKanbanProps) {
               )}
 
               {/* Add Task Button Triggering Popup */}
-              <div className="pt-1">
-                <button
-                  onClick={() => {
-                    setCreateStatus(col.statuses[0]);
-                    setShowCreateModal(true);
-                  }}
-                  className="w-full h-8 hover:bg-secondary/40 text-[10px] text-muted-foreground hover:text-foreground inline-flex items-center justify-center gap-1 rounded-xl transition cursor-pointer"
-                >
-                  <Plus className="size-3" />
-                  Add Task
-                </button>
-              </div>
+              {canAddTask && (
+                <div className="pt-1">
+                  <button
+                    onClick={() => {
+                      setCreateStatus(col.statuses[0]);
+                      setShowCreateModal(true);
+                    }}
+                    className="w-full h-8 hover:bg-secondary/40 text-[10px] text-muted-foreground hover:text-foreground inline-flex items-center justify-center gap-1 rounded-xl transition cursor-pointer"
+                  >
+                    <Plus className="size-3" />
+                    Add Task
+                  </button>
+                </div>
+              )}
 
             </div>
           );

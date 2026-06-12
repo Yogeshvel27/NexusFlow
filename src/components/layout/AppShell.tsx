@@ -5,14 +5,61 @@ import { OrganizationModal } from "./OrganizationModal";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { usePathname } from "next/navigation";
-import logo from "@/components/asset/logo.png";
+import logo from "@/components/asset/white-logo.png";
+import Image from "next/image";
 import { useUser, useAuth, useClerk, useOrganization, useOrganizationList, SignOutButton } from "@clerk/nextjs";
 import { useWelcomeSpeech } from "@/hooks/useWelcomeSpeech";
+import { toast } from "sonner";
 import {
   LayoutDashboard, FolderKanban, Users, CalendarRange, Activity,
   ShieldAlert, FolderOpen, Workflow, BarChart3, Settings,
   Search, Bell, ChevronRight, ChevronDown, LogOut, Plus, User,
+  AlertTriangle, CheckCircle2, Folder, FileCheck, X
 } from "lucide-react";
+
+interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: "budget" | "approval" | "upload" | "risk";
+  time: string;
+  read: boolean;
+}
+
+const INITIAL_NOTIFICATIONS: AppNotification[] = [
+  {
+    id: "n-1",
+    title: "Pending Approval",
+    message: "PMO Review pending for 'Q3 Resource Plan' workflow step.",
+    type: "approval",
+    time: "5m ago",
+    read: false
+  },
+  {
+    id: "n-2",
+    title: "Budget Alert",
+    message: "Project 'Atlas Banking Platform' has reached 85% budget utilization.",
+    type: "budget",
+    time: "1h ago",
+    read: false
+  },
+  {
+    id: "n-3",
+    title: "New Document Upload",
+    message: "Sasha Reyes uploaded 'Atlas-Architecture-v4.pdf' to folder Architecture.",
+    type: "upload",
+    time: "2h ago",
+    read: true
+  },
+  {
+    id: "n-4",
+    title: "Risk Level Raised",
+    message: "New High Severity risk 'Database Migration Latency' registered.",
+    type: "risk",
+    time: "1d ago",
+    read: true
+  }
+];
 
 const nav = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -31,18 +78,16 @@ const nav = [
   { to: "/documents", label: "Document Repository", icon: FolderOpen },
   { to: "/approvals", label: "Workflow Approvals", icon: Workflow },
   { to: "/reports", label: "Reports & Analytics", icon: BarChart3 },
-  { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
 const ROUTE_PERMISSIONS: Record<string, string[]> = {
   "/dashboard": ["org:admin", "org:executive_management", "org:project_managers", "org:resource_managers", "org:finance_team", "org:department_heads", "org:it_administrators", "org:member"],
-  "/projects": ["org:admin", "org:executive_management", "org:project_managers", "org:resource_managers", "org:finance_team", "org:department_heads", "org:member"],
-  "/resources": ["org:admin", "org:executive_management", "org:project_managers", "org:resource_managers", "org:finance_team", "org:department_heads"],
-  "/risks": ["org:admin", "org:executive_management", "org:project_managers", "org:department_heads", "org:member"],
-  "/documents": ["org:admin", "org:executive_management", "org:project_managers", "org:resource_managers", "org:finance_team", "org:department_heads", "org:member"],
-  "/approvals": ["org:admin", "org:executive_management", "org:project_managers", "org:resource_managers", "org:finance_team", "org:department_heads"],
+  "/projects": ["org:admin", "org:executive_management", "org:project_managers", "org:resource_managers", "org:finance_team", "org:department_heads", "org:it_administrators", "org:member"],
+  "/resources": ["org:admin", "org:executive_management", "org:project_managers", "org:resource_managers", "org:department_heads", "org:it_administrators"],
+  "/risks": ["org:admin", "org:executive_management", "org:project_managers", "org:department_heads", "org:it_administrators", "org:member"],
+  "/documents": ["org:admin", "org:executive_management", "org:project_managers", "org:resource_managers", "org:finance_team", "org:department_heads", "org:it_administrators", "org:member"],
+  "/approvals": ["org:admin", "org:executive_management", "org:project_managers", "org:resource_managers", "org:finance_team", "org:department_heads", "org:it_administrators"],
   "/reports": ["org:admin", "org:executive_management", "org:project_managers", "org:resource_managers", "org:finance_team", "org:department_heads", "org:it_administrators"],
-  "/settings": ["org:admin", "org:it_administrators"],
 };
 
 function crumbsFromPath(path: string) {
@@ -71,6 +116,118 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [showOrgDropdown, setShowOrgDropdown] = useState(false);
   const [showOrgModal, setShowOrgModal] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  // Synchronize notifications with localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("nexus_notifications");
+    if (saved) {
+      setNotifications(JSON.parse(saved));
+    } else {
+      setNotifications(INITIAL_NOTIFICATIONS);
+      localStorage.setItem("nexus_notifications", JSON.stringify(INITIAL_NOTIFICATIONS));
+    }
+  }, []);
+
+  // Sync state across components/tabs
+  useEffect(() => {
+    const handleUpdate = () => {
+      const saved = localStorage.getItem("nexus_notifications");
+      if (saved) {
+        setNotifications(JSON.parse(saved));
+      }
+    };
+    window.addEventListener("nexus-notifications-updated", handleUpdate);
+    window.addEventListener("storage", handleUpdate);
+    return () => {
+      window.removeEventListener("nexus-notifications-updated", handleUpdate);
+      window.removeEventListener("storage", handleUpdate);
+    };
+  }, []);
+
+  // Update notifications helper
+  const updateNotifications = (newNotifs: AppNotification[]) => {
+    setNotifications(newNotifs);
+    localStorage.setItem("nexus_notifications", JSON.stringify(newNotifs));
+    window.dispatchEvent(new Event("nexus-notifications-updated"));
+  };
+
+  // Poll database for approved requests raised by this user
+  useEffect(() => {
+    if (!user) return;
+    
+    // Determine user's full name to compare with requester
+    const userFullName = [user.firstName, user.lastName].filter(Boolean).join(" ");
+    
+    async function checkNewApprovals() {
+      try {
+        const { data: dbApprovals, error } = await supabase
+          .from("approvals")
+          .select("*")
+          .eq("status", "Approved");
+          
+        if (error || !dbApprovals) return;
+        
+        // Load notified approval IDs to avoid duplicates
+        const notifiedStr = localStorage.getItem("nexus_notified_approvals");
+        const notifiedIds: string[] = notifiedStr ? JSON.parse(notifiedStr) : [];
+        
+        let newNotifiedIds = [...notifiedIds];
+        let hasNewNotification = false;
+        
+        const currentNotificationsStr = localStorage.getItem("nexus_notifications");
+        let currentNotifications: AppNotification[] = currentNotificationsStr 
+          ? JSON.parse(currentNotificationsStr) 
+          : INITIAL_NOTIFICATIONS;
+          
+        for (const req of dbApprovals) {
+          // If the requester matches the current user
+          const isUserRequest = req.requester && (
+            req.requester.toLowerCase().includes(userFullName.toLowerCase()) || 
+            (userFullName.toLowerCase().includes("systemadmin") && req.requester.toLowerCase().includes("systemadmin"))
+          );
+          
+          if (isUserRequest && !notifiedIds.includes(req.id)) {
+            // Found a new approved request raised by this user!
+            newNotifiedIds.push(req.id);
+            hasNewNotification = true;
+            
+            // Pop up!
+            toast.success(`Request ${req.id} for project "${req.project_name || req.project}" has been approved!`, {
+              duration: 10000,
+              icon: <CheckCircle2 className="size-5 text-green-500" />
+            });
+            
+            // Add notification item
+            const newNotif: AppNotification = {
+              id: `n-approval-approved-${req.id}-${Date.now()}`,
+              title: "Request Approved",
+              message: `Your request ${req.id} for "${req.project_name || req.project}" ($${Number(req.amount || 0).toLocaleString()}) has been approved.`,
+              type: "approval",
+              time: "Just now",
+              read: false
+            };
+            currentNotifications = [newNotif, ...currentNotifications];
+          }
+        }
+        
+        if (hasNewNotification) {
+          localStorage.setItem("nexus_notified_approvals", JSON.stringify(newNotifiedIds));
+          localStorage.setItem("nexus_notifications", JSON.stringify(currentNotifications));
+          setNotifications(currentNotifications);
+          window.dispatchEvent(new Event("nexus-notifications-updated"));
+        }
+      } catch (err) {
+        console.error("Error checking new approvals:", err);
+      }
+    }
+    
+    // Check immediately on mount, and then poll every 6 seconds
+    checkNewApprovals();
+    const interval = setInterval(checkNewApprovals, 6000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   const userImageUrl = user?.imageUrl;
   // Clerk always provides an imageUrl (auto-generated). Only treat as a real
@@ -210,8 +367,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <OrganizationModal open={showOrgModal} onClose={() => setShowOrgModal(false)} />
     <div className="min-h-screen flex w-full bg-background text-foreground">
       <aside className="w-64 shrink-0 bg-sidebar text-sidebar-foreground flex flex-col fixed inset-y-0 left-0 z-30">
-        <div className="h-24 flex items-center justify-center px-4 border-b border-sidebar-border">
-          <img src={logo.src} className="h-16 w-auto object-contain" alt="NexusFlow Logo" />
+        <div className="h-28 flex items-center justify-center px-4 border-b border-sidebar-border">
+          <Image src={logo} className="h-[100px] w-auto object-contain" alt="NexusFlow Logo" priority />
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
@@ -290,10 +447,120 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* Right Side: Notification Bell, Org Switcher & User Profile */}
           <div className="flex items-center gap-4">
-            <button className="relative size-10 grid place-items-center rounded-xl hover:bg-secondary transition shrink-0">
-              <Bell className="size-[18px] text-muted-foreground" />
-              <span className="absolute top-2 right-2 size-2 rounded-full bg-primary ring-2 ring-background" />
-            </button>
+            {/* Notification Bell with interactive dropdown */}
+            <div className="relative">
+              <button 
+                onClick={() => {
+                  setShowNotifications(!showNotifications);
+                  setShowUserDropdown(false);
+                  setShowOrgDropdown(false);
+                }}
+                className="relative size-10 grid place-items-center rounded-xl hover:bg-secondary transition shrink-0 cursor-pointer"
+              >
+                <Bell className="size-[18px] text-muted-foreground" />
+                {notifications.some(n => !n.read) && (
+                  <span className="absolute top-2 right-2 size-2 rounded-full bg-primary ring-2 ring-background animate-pulse" />
+                )}
+              </button>
+
+              {showNotifications && (
+                <>
+                  {/* Backdrop overlay to close when clicking outside */}
+                  <div className="fixed inset-0 z-30" onClick={() => setShowNotifications(false)} />
+                  
+                  {/* Dropdown Card */}
+                  <div className="absolute right-0 mt-2 w-80 bg-card border border-border rounded-xl shadow-xl z-40 overflow-hidden animate-in fade-in-50 slide-in-from-top-1 duration-200">
+                    {/* Header */}
+                    <div className="p-4 border-b border-border flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-foreground">Notifications</span>
+                        {notifications.filter(n => !n.read).length > 0 && (
+                          <span className="bg-primary/10 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                            {notifications.filter(n => !n.read).length} new
+                          </span>
+                        )}
+                      </div>
+                      {notifications.some(n => !n.read) && (
+                        <button 
+                          onClick={() => {
+                            updateNotifications(notifications.map(n => ({ ...n, read: true })));
+                            toast.success("All notifications marked as read");
+                          }}
+                          className="text-[10px] font-medium text-primary hover:underline cursor-pointer border-none bg-transparent"
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Notification List */}
+                    <div className="max-h-[300px] overflow-y-auto divide-y divide-border">
+                      {notifications.length === 0 ? (
+                        <div className="p-8 text-center text-xs text-muted-foreground">
+                          No notifications yet.
+                        </div>
+                      ) : (
+                        notifications.map((notif) => {
+                          const IconComponent = {
+                            budget: AlertTriangle,
+                            approval: FileCheck,
+                            upload: Folder,
+                            risk: ShieldAlert
+                          }[notif.type] || Bell;
+
+                          const colorClass = {
+                            budget: "text-amber-500 bg-amber-500/10",
+                            approval: "text-[#C67C4E] bg-[#C67C4E]/10",
+                            upload: "text-blue-500 bg-blue-500/10",
+                            risk: "text-red-500 bg-red-500/10"
+                          }[notif.type] || "text-muted-foreground bg-secondary";
+
+                          return (
+                            <div 
+                              key={notif.id} 
+                              onClick={() => {
+                                updateNotifications(notifications.map(n => n.id === notif.id ? { ...n, read: true } : n));
+                                setShowNotifications(false);
+                              }}
+                              className={`p-3.5 flex gap-3 text-left hover:bg-secondary/30 transition cursor-pointer relative ${!notif.read ? 'bg-primary/5' : ''}`}
+                            >
+                              <div className={`size-8 rounded-lg flex items-center justify-center shrink-0 ${colorClass}`}>
+                                <IconComponent className="size-4" />
+                              </div>
+                              <div className="space-y-1 min-w-0 flex-1">
+                                <div className="flex items-start justify-between gap-1">
+                                  <span className="font-semibold text-xs text-foreground truncate">{notif.title}</span>
+                                  <span className="text-[9px] text-muted-foreground whitespace-nowrap">{notif.time}</span>
+                                </div>
+                                <p className="text-[11px] text-muted-foreground leading-normal line-clamp-2">{notif.message}</p>
+                              </div>
+                              {!notif.read && (
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 size-1.5 rounded-full bg-primary" />
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Footer */}
+                    {notifications.length > 0 && (
+                      <div className="p-2.5 bg-secondary/10 border-t border-border flex justify-between gap-2">
+                        <button 
+                          onClick={() => {
+                            updateNotifications([]);
+                            toast.success("Notifications cleared");
+                          }}
+                          className="w-full text-[10px] font-medium text-muted-foreground hover:text-foreground text-center py-1 rounded hover:bg-secondary/40 transition cursor-pointer border-none bg-transparent"
+                        >
+                          Clear All
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
 
             <div className="h-8 w-px bg-border" />
 

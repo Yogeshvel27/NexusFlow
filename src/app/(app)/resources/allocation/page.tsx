@@ -171,7 +171,7 @@ async function syncRelatedTables(updated: (Resource & { timesheets?: any[] })[])
 function Allocation() {
   const { user } = useUser();
   const { orgRole } = useAuth();
-  const { projects, updateProjectBudget } = useWorkspace();
+  const { projects, updateProjectBudget, resources: dbResources, refreshData } = useWorkspace();
 
   const isProjectManager = orgRole ? orgRole.toLowerCase().includes("project_manager") : false;
 
@@ -235,79 +235,23 @@ function Allocation() {
     }
   }, [days]);
 
-  // Load state from Supabase, with local storage fallback and real-time synchronization
+  // Initialize and keep local state in sync with context cache
   useEffect(() => {
-    async function loadResources() {
-      try {
-        const { data, error } = await supabase.from("resources").select("*");
-        if (error || !data || data.length === 0) {
-          const saved = localStorage.getItem("nexus_resources_v2");
-          if (saved) {
-            setResources(JSON.parse(saved));
-          }
-        } else {
-          const mapped = data.map(mapDbRow);
-          setResources(mapped);
-          localStorage.setItem("nexus_resources_v2", JSON.stringify(mapped));
-        }
-      } catch (err) {
-        console.error("Failed to load resources from Supabase:", err);
-        const saved = localStorage.getItem("nexus_resources_v2");
-        if (saved) {
-          setResources(JSON.parse(saved));
-        }
+    if (dbResources && dbResources.length > 0) {
+      setResources(dbResources.map(mapDbRow));
+    } else {
+      const saved = localStorage.getItem("nexus_resources_v2");
+      if (saved) {
+        setResources(JSON.parse(saved).map(mapDbRow));
       }
     }
-    loadResources();
-
-    // Live Supabase postgres_changes channel
-    const channel = supabase
-      .channel("resources-realtime-alloc")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "resources" }, payload => {
-        setResources(prev => {
-          if (prev.find(r => r.id === payload.new.id)) return prev;
-          const updated = [...prev, mapDbRow(payload.new)];
-          localStorage.setItem("nexus_resources_v2", JSON.stringify(updated));
-          return updated;
-        });
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "resources" }, payload => {
-        setResources(prev => {
-          const updated = prev.map(r => r.id === payload.new.id ? mapDbRow(payload.new) : r);
-          localStorage.setItem("nexus_resources_v2", JSON.stringify(updated));
-          return updated;
-        });
-      })
-      .on("postgres_changes", { event: "DELETE", schema: "public", table: "resources" }, payload => {
-        setResources(prev => {
-          const updated = prev.filter(r => r.id !== payload.old.id);
-          localStorage.setItem("nexus_resources_v2", JSON.stringify(updated));
-          return updated;
-        });
-      })
-      .subscribe();
-
-    // Storage sync listener
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === "nexus_resources_v2" && e.newValue) {
-        try {
-          setResources(JSON.parse(e.newValue));
-        } catch {}
-      }
-    };
-    window.addEventListener("storage", handleStorageChange);
-
-    return () => {
-      supabase.removeChannel(channel);
-      window.removeEventListener("storage", handleStorageChange);
-    };
-  }, []);
+  }, [dbResources]);
 
   const saveState = async (updated: Resource[]) => {
     setResources(updated);
     localStorage.setItem("nexus_resources_v2", JSON.stringify(updated));
 
-    try {
+    const syncPromise = (async () => {
       const rows = updated.map(r => ({
         id: r.id,
         name: r.name,
@@ -335,21 +279,21 @@ function Allocation() {
         if (error.code === "23505" && error.message.includes("email")) {
           const { error: retryError } = await supabase.from("resources").upsert(rows, { onConflict: "email" });
           if (retryError) {
-            console.error("Failed to upsert resources (email conflict retry):", retryError);
-            toast.error(`Database sync failed: ${retryError.message}`);
-          } else {
-            await syncRelatedTables(updated);
+            throw retryError;
           }
         } else {
-          console.error("Failed to upsert resources in Supabase:", error);
-          toast.error(`Database sync failed: ${error.message}`);
+          throw error;
         }
-      } else {
-        await syncRelatedTables(updated);
       }
-    } catch (err) {
-      console.error("Failed to upsert resources in Supabase:", err);
-    }
+      await syncRelatedTables(updated);
+      await refreshData();
+    })();
+
+    toast.promise(syncPromise, {
+      loading: "Saving resource allocations...",
+      success: "Resource allocations saved and synchronized!",
+      error: (err) => `Database sync failed: ${err.message || String(err)}`
+    });
   };
 
   const notifyITAdminOfAllocation = async (
@@ -378,7 +322,7 @@ function Allocation() {
             projectName: projectName,
             projectManager: managerName,
             projectRole: role,
-            notificationType: "project"
+            notificationType: "allocation"
           })
         });
       }

@@ -67,7 +67,20 @@ export function ProjectDashboard({
     ]);
   }, [project.teamMembers, projectTasks]);
 
-  const assignableResources = allResources.filter(res => !assignedMemberNames.has(res.name));
+  const isHumanResource = (res: any) => {
+    if (!res || !res.name) return false;
+    const nameLower = res.name.toLowerCase();
+    const nonHumanKeywords = [
+      "aws", "gpt", "claude", "postgresql", "mongodb", "redis", "s3", "azure", 
+      "kubernetes", "aks", "storage", "database", "balancer", "cluster", "bucket", 
+      "instance", "api", "machine"
+    ];
+    return !nonHumanKeywords.some(keyword => nameLower.includes(keyword));
+  };
+
+  const assignableResources = React.useMemo(() => {
+    return allResources.filter(res => isHumanResource(res) && !assignedMemberNames.has(res.name));
+  }, [allResources, assignedMemberNames]);
   
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedResourceName, setSelectedResourceName] = useState("");
@@ -97,7 +110,7 @@ export function ProjectDashboard({
 
   const filteredResources = React.useMemo(() => {
     return assignableResources.filter((res: any) => {
-      const email = `${res.name.toLowerCase().replace(/\s+/g, ".")}@nexusflow.com`;
+      const email = res.email || `${res.name.toLowerCase().replace(/\s+/g, ".")}@nexusflow.com`;
       const matchesSearch = 
         res.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         email.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -115,10 +128,33 @@ export function ProjectDashboard({
     setSelectedProfile(res);
   };
 
+  const triggerProjectAssignmentEmail = (resName: string) => {
+    const resource = allResources.find(r => r.name === resName);
+    const email = resource?.email || `${resName.toLowerCase().replace(/\s+/g, ".")}@nexusflow.com`;
+
+    fetch("/api/send-email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: email,
+        employeeName: resName,
+        projectName: project.name,
+        projectManager: project.projectManager,
+        projectRole: projectRole || "Team Member",
+        notificationType: "project"
+      })
+    }).catch(err => {
+      console.error("Failed to send project assignment email:", err);
+    });
+  };
+
   const handleFormSubmit = () => {
     if (!selectedResourceName) return;
     const updated = [...(project.teamMembers || []), selectedResourceName];
     updateProjectMembers(project.id, updated);
+    triggerProjectAssignmentEmail(selectedResourceName);
     setSelectedResourceName("");
     setIsAddModalOpen(false);
   };
@@ -148,6 +184,7 @@ export function ProjectDashboard({
     if (!selectedResourceName) return;
     const updated = [...(project.teamMembers || []), selectedResourceName];
     updateProjectMembers(project.id, updated);
+    triggerProjectAssignmentEmail(selectedResourceName);
     setSelectedResourceName("");
     setIsAddModalOpen(false);
   };
@@ -502,7 +539,7 @@ export function ProjectDashboard({
                 {filteredResources.slice(0, visibleCount).map((res) => {
                   const isSelected = selectedResourceName === res.name;
                   const initials = res.name.split(" ").map((n: string) => n[0]).join("");
-                  const email = `${res.name.toLowerCase().replace(/\s+/g, ".")}@nexusflow.com`;
+                  const email = res.email || `${res.name.toLowerCase().replace(/\s+/g, ".")}@nexusflow.com`;
                   const avatarTheme = getAvatarColor(res.name);
                   
                   return (
@@ -633,9 +670,8 @@ export function ProjectDashboard({
         </div>
       )}
 
-      {/* Member Profile Drawer */}
       {selectedProfile && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-end">
+        <div className="fixed inset-0 flex items-center justify-end" style={{ zIndex: 100 }}>
           <div onClick={() => setSelectedProfile(null)} className="absolute inset-0 bg-black/60 backdrop-blur-xs" />
           
           <div className="relative bg-card border-l border-border h-full w-full max-w-lg shadow-elevated flex flex-col overflow-hidden animate-in slide-in-from-right duration-250">

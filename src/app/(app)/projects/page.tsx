@@ -18,16 +18,19 @@ function Projects() {
   
   const isMember = orgRole === "org:member";
   
-  const canCreate = !orgRole || 
-    orgRole.toLowerCase().includes("admin") || 
-    orgRole.toLowerCase().includes("project_manager") || 
-    orgRole.toLowerCase().includes("department_head");
+  const canCreate = !orgRole || (
+    orgRole === "org:admin" ||
+    orgRole === "org:project_managers" ||
+    orgRole === "org:department_heads" ||
+    orgRole === "org:executive_management"
+  );
 
   const assignedProjectIds = React.useMemo(() => {
     return new Set(
       projects
         .filter(p => 
           (user?.fullName && p.projectManager === user.fullName) || 
+          (user?.fullName && p.teamMembers?.some(m => m.toLowerCase().trim() === (user.fullName || "").toLowerCase().trim())) ||
           tasks.some(t => t.projectId === p.id && user?.fullName && t.assignee === user.fullName)
         )
         .map(p => p.id)

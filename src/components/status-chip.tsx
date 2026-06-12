@@ -28,7 +28,7 @@ export function StatusChip({ children, tone = "neutral" }: { children: ReactNode
 
 export function statusTone(status: string): Tone {
   const s = status.toLowerCase();
-  if (s.includes("track") || s === "approved" || s === "paid" || s === "completed") return "success";
+  if (s.includes("track") || s === "approved" || s === "paid" || s === "completed" || s === "active") return "success";
   if (s.includes("risk") || s === "pending" || s === "mitigating" || s === "monitoring") return "warning";
   if (s.includes("delay") || s === "overdue" || s === "rejected" || s === "open" || s === "critical" || s === "high") return "danger";
   if (s === "draft" || s === "bench") return "neutral";

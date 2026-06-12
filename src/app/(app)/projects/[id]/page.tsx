@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useUser, useAuth, useOrganization } from "@clerk/nextjs";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import { supabase } from "@/lib/supabase";
 import { ProjectDashboard } from "@/components/project/project-dashboard";
 import { ProjectKanban } from "@/components/project/project-kanban";
 import { ProjectBacklog } from "@/components/project/project-backlog";
@@ -32,7 +33,7 @@ import { toast } from "sonner";
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { projects, tasks, updateProjectStatus } = useWorkspace();
+  const { projects, tasks, updateProjectStatus, resources: contextResources } = useWorkspace();
   const [activeTab, setActiveTab] = useState<"dashboard" | "kanban" | "backlog" | "gantt" | "audit">("dashboard");
   const [triggerAddMember, setTriggerAddMember] = useState(false);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
@@ -41,13 +42,18 @@ export default function ProjectDetailPage() {
   const [auditComment, setAuditComment] = useState("");
   const [showStatusMenu, setShowStatusMenu] = useState(false);
 
-  const { user } = useUser();
-  const { orgRole } = useAuth();
-  const { organization, memberships } = useOrganization({
-    memberships: { limit: 50, infinite: false }
-  });
+  const { user, isLoaded: isUserLoaded } = useUser();
+  const { orgRole, isLoaded: isAuthLoaded } = useAuth();
+  const { organization, isLoaded: isOrgLoaded } = useOrganization();
 
   const isMember = orgRole === "org:member";
+  const isAdmin = orgRole === "org:admin";
+  const canManage = !orgRole || (
+    orgRole === "org:admin" ||
+    orgRole === "org:project_managers" ||
+    orgRole === "org:department_heads" ||
+    orgRole === "org:executive_management"
+  );
 
   const projectId = params?.id as string;
   const project = projects.find(p => p.id === projectId);
@@ -67,18 +73,54 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const [dbResources, setDbResources] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (contextResources && contextResources.length > 0) {
+      setDbResources(contextResources.map(r => ({
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        phone: r.phone,
+        role: r.role || "Member",
+        dept: r.dept || "Engineering",
+        skills: typeof r.skills === "string" ? JSON.parse(r.skills) : (r.skills || []),
+        status: r.status || "Available",
+        util: Number(r.utilization_rate || r.util || 0),
+        allocation: 0
+      })));
+    } else {
+      const saved = localStorage.getItem("nexus_resources_v2");
+      if (saved) {
+        setDbResources(JSON.parse(saved));
+      }
+    }
+  }, [contextResources]);
+
   const isAssigned = React.useMemo(() => {
     if (!project) return false;
     return (
       (user?.fullName && project.projectManager === user.fullName) ||
+      (user?.fullName && project.teamMembers?.some(m => m.toLowerCase().trim() === (user.fullName || "").toLowerCase().trim())) ||
       tasks.some(t => t.projectId === project.id && user?.fullName && t.assignee === user.fullName)
     );
   }, [project, tasks, user?.fullName]);
 
+  const [clerkMembers, setClerkMembers] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!organization || !isAdmin) return;
+    organization.getMemberships({ pageSize: 50 }).then((res) => {
+      setClerkMembers(res.data ?? []);
+    }).catch((e) => {
+      console.warn("Failed to fetch memberships in ProjectDetailPage:", e);
+    });
+  }, [organization, isAdmin]);
+
   const allResources = React.useMemo(() => {
-    const list = [...resources];
-    if (memberships?.data) {
-      memberships.data.forEach((m: any) => {
+    const list = dbResources.length > 0 ? [...dbResources] : [...resources];
+    if (clerkMembers && clerkMembers.length > 0) {
+      clerkMembers.forEach((m: any) => {
         // Exclude administrators (org:admin)
         if (m.role === "org:admin") return;
 
@@ -98,7 +140,15 @@ export default function ProjectDetailPage() {
       });
     }
     return list;
-  }, [memberships?.data]);
+  }, [dbResources, clerkMembers]);
+
+  if (!isUserLoaded || !isAuthLoaded || !isOrgLoaded) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="text-xs text-muted-foreground animate-pulse">Loading project details...</div>
+      </div>
+    );
+  }
 
   if (!project || (isMember && !isAssigned)) {
     return (
@@ -150,8 +200,8 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Project Banner Header */}
-      <div className="bg-card border border-border rounded-2xl p-6 shadow-card space-y-4 relative overflow-hidden">
-        <div className="absolute top-0 right-0 h-full w-[2px] bg-gradient-to-b from-primary to-accent" />
+      <div className="bg-card border border-border rounded-2xl p-6 shadow-card space-y-4 relative">
+        <div className="absolute top-0 right-0 h-full w-[2px] bg-gradient-to-b from-primary to-accent rounded-r-2xl" />
         
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
@@ -177,17 +227,16 @@ export default function ProjectDetailPage() {
 
           {/* Workflow Action Panel */}
           <div className="flex flex-col gap-2.5 items-end relative w-48">
-            <button
-              onClick={() => setShowCreateTaskModal(true)}
-              className="h-9 px-3.5 rounded-xl bg-gradient-to-r from-primary to-accent text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition shadow-copper cursor-pointer w-full"
-            >
-              <Plus className="size-3.5" /> Add Task
-            </button>
+            {canManage && (
+              <button
+                onClick={() => setShowCreateTaskModal(true)}
+                className="h-9 px-3.5 rounded-xl bg-gradient-to-r from-primary to-accent text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition shadow-copper cursor-pointer w-full"
+              >
+                <Plus className="size-3.5" /> Add Task
+              </button>
+            )}
 
-            {(!orgRole || 
-              orgRole.toLowerCase().includes("admin") || 
-              orgRole.toLowerCase().includes("project_manager") || 
-              orgRole.toLowerCase().includes("department_head")) && (
+            {canManage && (
               <button
                 onClick={() => {
                   setActiveTab("dashboard");
@@ -222,76 +271,29 @@ export default function ProjectDetailPage() {
                   
                   <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Available Transitions</div>
                   <div className="flex flex-col gap-1.5">
-                    {project.status === "Draft" && (
-                      <button
-                        onClick={() => handleTransition("Pending Approval")}
-                        className="h-8 px-2 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-lg text-left text-xs font-medium transition"
-                      >
-                        Submit for PMO Approval
-                      </button>
-                    )}
-                    {project.status === "Pending Approval" && (
-                      <>
-                        <button
-                          onClick={() => handleTransition("Approved")}
-                          className="h-8 px-2 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-600 hover:text-white rounded-lg text-left text-xs font-medium transition"
-                        >
-                          Approve Project (PMO)
-                        </button>
-                        <button
-                          onClick={() => handleTransition("Draft")}
-                          className="h-8 px-2 bg-red-500/10 hover:bg-red-500 text-red-600 hover:text-white rounded-lg text-left text-xs font-medium transition"
-                        >
-                          Reject / Send back to Draft
-                        </button>
-                      </>
-                    )}
-                    {project.status === "Approved" && (
+                    {project.status !== "In Progress" && (
                       <button
                         onClick={() => handleTransition("In Progress")}
                         className="h-8 px-2 bg-primary/10 hover:bg-primary text-primary hover:text-white rounded-lg text-left text-xs font-medium transition"
                       >
-                        Activate & Start Project
+                        Transition to In Progress
                       </button>
                     )}
-                    {["In Progress", "Delayed", "On Hold"].includes(project.status) && (
-                      <>
-                        <button
-                          onClick={() => handleTransition("In Progress")}
-                          className="h-8 px-2 bg-secondary hover:bg-secondary/80 rounded-lg text-left text-xs font-medium transition"
-                        >
-                          Mark In Progress
-                        </button>
-                        <button
-                          onClick={() => handleTransition("On Hold")}
-                          className="h-8 px-2 bg-amber-500/10 hover:bg-amber-500 text-amber-600 hover:text-white rounded-lg text-left text-xs font-medium transition"
-                        >
-                          Place On Hold
-                        </button>
-                        <button
-                          onClick={() => handleTransition("Delayed")}
-                          className="h-8 px-2 bg-red-500/10 hover:bg-red-500 text-red-600 hover:text-white rounded-lg text-left text-xs font-medium transition"
-                        >
-                          Flag Delayed
-                        </button>
-                        <button
-                          onClick={() => handleTransition("Completed")}
-                          className="h-8 px-2 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-600 hover:text-white rounded-lg text-left text-xs font-medium transition"
-                        >
-                          Complete Project
-                        </button>
-                      </>
-                    )}
-                    {project.status === "Completed" && (
+                    {project.status !== "Active" && (
                       <button
-                        onClick={() => handleTransition("Closed")}
-                        className="h-8 px-2 bg-stone-700/10 hover:bg-stone-700 text-stone-700 hover:text-white rounded-lg text-left text-xs font-medium transition"
+                        onClick={() => handleTransition("Active")}
+                        className="h-8 px-2 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-600 hover:text-white rounded-lg text-left text-xs font-medium transition"
                       >
-                        Close Engagement
+                        Transition to Active
                       </button>
                     )}
-                    {project.status === "Closed" && (
-                      <span className="text-[10px] text-muted-foreground italic">No further actions - Project Closed</span>
+                    {project.status !== "Draft" && (
+                      <button
+                        onClick={() => handleTransition("Draft")}
+                        className="h-8 px-2 bg-red-500/10 hover:bg-red-500 text-red-600 hover:text-white rounded-lg text-left text-xs font-medium transition"
+                      >
+                        Transition to Draft
+                      </button>
                     )}
                   </div>
                 </div>
@@ -369,10 +371,7 @@ export default function ProjectDetailPage() {
             allResources={allResources}
             triggerAddMember={triggerAddMember}
             onTriggerAddMemberReset={() => setTriggerAddMember(false)}
-            canManageMembers={!orgRole || 
-              orgRole.toLowerCase().includes("admin") || 
-              orgRole.toLowerCase().includes("project_manager") || 
-              orgRole.toLowerCase().includes("department_head")} 
+            canManageMembers={canManage} 
           />
         )}
         {activeTab === "kanban" && <ProjectKanban projectId={project.id} />}

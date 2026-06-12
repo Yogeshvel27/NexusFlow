@@ -19,10 +19,17 @@ interface WorkspaceContextType {
   projects: Project[];
   tasks: WorkItem[];
   users: any[];
+  resources: any[];
+  risks: any[];
+  approvals: any[];
+  approvalAuditLogs: any[];
+  projectAuditLogs: any[];
+  workItemActivityLogs: any[];
   loaded: boolean;
   loadError: string | null;
   setOrganizationId: (id: string) => void;
   currentOrgId: string;
+  refreshData: () => Promise<void>;
   createProject: (p: {
     name: string;
     client: string;
@@ -70,6 +77,12 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<WorkItem[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [resources, setResources] = useState<any[]>([]);
+  const [risks, setRisks] = useState<any[]>([]);
+  const [approvals, setApprovals] = useState<any[]>([]);
+  const [approvalAuditLogs, setApprovalAuditLogs] = useState<any[]>([]);
+  const [projectAuditLogs, setProjectAuditLogs] = useState<any[]>([]);
+  const [workItemActivityLogs, setWorkItemActivityLogs] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [currentOrgId, setOrganizationId] = useState<string>("personal");
@@ -135,296 +148,270 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Load state from Supabase, with localStorage fallback
-  useEffect(() => {
-    let active = true;
+  // Parallel database load with static fallback and caching
+  async function loadData(isActive = true) {
+    try {
+      let dbProjects: any[] | null = null;
+      let dbWorkItems: any[] | null = null;
+      let dbUsers: any[] | null = null;
+      let dbResources: any[] | null = null;
+      let dbRisks: any[] | null = null;
+      let dbApprovals: any[] | null = null;
+      let dbAppAudits: any[] | null = null;
+      let dbProjAudits: any[] | null = null;
+      let dbTaskAudits: any[] | null = null;
 
-    async function loadData() {
+      let prjError: any = null;
+      let taskError: any = null;
+
       try {
-        let dbProjects: any[] | null = null;
-        let dbWorkItems: any[] | null = null;
-        let dbUsers: any[] | null = null;
-        let prjError: any = null;
-        let taskError: any = null;
+        const [
+          resProj,
+          resTasks,
+          resUsers,
+          resResources,
+          resRisks,
+          resApprovals,
+          resAppAudits,
+          resProjAudits,
+          resTaskAudits
+        ] = await Promise.all([
+          supabase.from("projects").select("*").order("created_at", { ascending: false }),
+          supabase.from("work_items").select(`
+            *,
+            comments:work_item_comments(id, author, text, created_at),
+            activity_logs:work_item_activity_logs(id, timestamp, user_name, action)
+          `).order("created_at", { ascending: true }),
+          supabase.from("users").select("*"),
+          supabase.from("resources").select("*"),
+          supabase.from("risks").select("*"),
+          supabase.from("approvals").select("*"),
+          supabase.from("approval_audit_logs").select("*"),
+          supabase.from("project_audit_logs").select("*"),
+          supabase.from("work_item_activity_logs").select("*")
+        ]);
 
-        // Try authenticated client first
-        try {
-          const client = await getAuthenticatedClient();
-          const resProj = await client
-            .from("projects")
-            .select("*")
-            .order("created_at", { ascending: false });
-          dbProjects = resProj.data;
-          prjError = resProj.error;
-
-          const resTasks = await client
-            .from("work_items")
-            .select(`
-              *,
-              comments:work_item_comments(id, author, text, created_at),
-              activity_logs:work_item_activity_logs(id, timestamp, user_name, action)
-            `)
-            .order("created_at", { ascending: true });
-          dbWorkItems = resTasks.data;
-          taskError = resTasks.error;
-
-          const resUsers = await client.from("users").select("*");
-          if (!resUsers.error && resUsers.data) {
-            dbUsers = resUsers.data;
-          }
-
-          if (prjError || taskError) {
-            console.warn("Authenticated client query failed, will try static client fallback...", prjError || taskError);
-            dbProjects = null;
-            dbWorkItems = null;
-          }
-        } catch (authErr) {
-          console.warn("Error getting authenticated client, will try static client fallback...", authErr);
-        }
-
-        // Fallback to static client if authenticated client failed or returned nothing
-        if (!dbProjects || dbProjects.length === 0) {
-          console.log("Fetching projects using static client fallback");
-          const resProjStatic = await supabase
-            .from("projects")
-            .select("*")
-            .order("created_at", { ascending: false });
-          dbProjects = resProjStatic.data;
-          prjError = resProjStatic.error;
-        }
-
-        if (!dbWorkItems || dbWorkItems.length === 0) {
-          console.log("Fetching work items using static client fallback");
-          const resTasksStatic = await supabase
-            .from("work_items")
-            .select(`
-              *,
-              comments:work_item_comments(id, author, text, created_at),
-              activity_logs:work_item_activity_logs(id, timestamp, user_name, action)
-            `)
-            .order("created_at", { ascending: true });
-          dbWorkItems = resTasksStatic.data;
-          taskError = resTasksStatic.error;
-        }
-
-        if (!dbUsers || dbUsers.length === 0) {
-          const resUsersStatic = await supabase.from("users").select("*");
-          if (!resUsersStatic.error && resUsersStatic.data) {
-            dbUsers = resUsersStatic.data;
-          }
-        }
+        dbProjects = resProj.data;
+        prjError = resProj.error;
+        dbWorkItems = resTasks.data;
+        taskError = resTasks.error;
+        dbUsers = resUsers.data;
+        dbResources = resResources.data;
+        dbRisks = resRisks.data;
+        dbApprovals = resApprovals.data;
+        dbAppAudits = resAppAudits.data;
+        dbProjAudits = resProjAudits.data;
+        dbTaskAudits = resTaskAudits.data;
 
         if (prjError || taskError) {
-          const errMsg = (prjError?.message || "") + " | " + (taskError?.message || "");
-          console.error("Supabase load error (both auth and static clients failed):", errMsg);
-          setLoadError(errMsg);
-          loadFromLocalStorage();
-          return;
+          console.warn("Parallel Supabase fetch returned warning:", prjError || taskError);
         }
+      } catch (parallelErr) {
+        console.warn("Failed parallel load from static client:", parallelErr);
+      }
 
-        let mappedProjects: Project[] = [];
-        if (dbProjects && dbProjects.length > 0) {
-          mappedProjects = dbProjects.map((p: any) => ({
-            id: p.id,
-            code: p.code,
-            name: p.name,
-            client: p.client,
-            organizationId: p.organization_id || "personal",
-            department: p.department || "Engineering",
-            budget: Number(p.budget),
-            spent: Number(p.spent),
-            startDate: p.start_date,
-            endDate: p.end_date,
-            priority: p.priority,
-            description: p.description || "",
-            projectManager: p.project_manager,
-            status: p.status,
-            auditLog: []
-          }));
-        } else {
-          mappedProjects = initialProjects;
-          await seedInitialProjects(initialProjects);
-        }
+      if (prjError || taskError || !dbProjects) {
+        throw new Error((prjError?.message || "") + " | " + (taskError?.message || ""));
+      }
 
-        let mappedTasks: WorkItem[] = [];
-        if (dbWorkItems && dbWorkItems.length > 0) {
-          mappedTasks = dbWorkItems.map((t: any) => ({
-            id: t.id,
-            projectId: t.project_id,
-            parentId: t.parent_id || undefined,
-            type: t.type,
-            title: t.title,
-            description: t.description || "",
-            status: t.status,
-            priority: t.priority,
-            assignee: t.assignee === "YOGESH VEL" || t.assignee?.toLowerCase() === "yogeshvel" ? "YOGESH VEL" : (t.assignee || undefined),
-            reporter: t.reporter,
-            reviewer: t.reviewer || undefined,
-            dueDate: t.due_date || undefined,
-            estimatedHours: Number(t.estimated_hours),
-            actualHours: Number(t.actual_hours),
-            tags: t.tags || [],
-            attachments: Array.isArray(t.attachments) ? t.attachments : [],
-            comments: Array.isArray(t.comments) ? t.comments.map((c: any) => ({
-              id: c.id,
-              author: c.author,
-              text: c.text,
-              createdAt: c.created_at
-            })) : [],
-            activityHistory: Array.isArray(t.activity_logs) ? t.activity_logs.map((log: any) => ({
-              id: log.id,
-              timestamp: log.timestamp,
-              user: log.user_name,
-              action: log.action
-            })) : [],
-            timerStartedAt: t.timer_started_at || undefined,
-            accumulatedSeconds: Number(t.accumulated_seconds || 0),
-            isDelayed: !!t.is_delayed,
-            performanceScore: t.performance_score !== null && t.performance_score !== undefined ? Number(t.performance_score) : undefined
-          }));
-        } else {
-          mappedTasks = initialTasks;
-          await seedInitialTasks(initialTasks);
-        }
+      // Sync project team members
+      const resourceIdToName: Record<string, string> = {};
+      if (dbResources) {
+        dbResources.forEach(r => {
+          resourceIdToName[r.id] = r.name;
+        });
+      }
 
-        // Merge project members from localStorage
-        if (typeof window !== "undefined") {
-          const localMembers = localStorage.getItem("nf_project_members");
-          const membersMap = localMembers ? JSON.parse(localMembers) : {};
-          mappedProjects = mappedProjects.map(p => ({
-            ...p,
-            teamMembers: p.teamMembers || membersMap[p.id] || []
-          }));
-        }
-
-        // Filter projects and tasks by active organization context
-        const filteredProjects = mappedProjects.filter(p => p.organizationId === currentOrgId);
-        
-        const visibleProjectIds = new Set(filteredProjects.map(p => p.id));
-        const filteredTasks = mappedTasks.filter(t => visibleProjectIds.has(t.projectId));
-
-        if (!active) return;
-
-        if (dbUsers) {
-          setUsers(dbUsers);
-          if (typeof window !== "undefined") {
-            localStorage.setItem("nf_users", JSON.stringify(dbUsers));
-          }
-        }
-
-        // Check for existing projects that have assigned tasks but are not 'In Progress', and auto-transition them
-        let hasChanges = false;
-        const activatedProjectsList = filteredProjects.map(p => {
-          if (p.status !== "In Progress") {
-            const hasAssignedTask = filteredTasks.some(t => t.projectId === p.id && t.assignee && t.assignee.trim() !== "");
-            if (hasAssignedTask) {
-              hasChanges = true;
-              
-              const updatedLog = {
-                id: `p-log-${Date.now()}`,
-                timestamp: new Date().toISOString(),
-                user: "System",
-                fromStatus: p.status,
-                toStatus: "In Progress" as const,
-                comment: "Project activated automatically because an assigned task was found."
-              };
-
-              // Update Supabase
-              supabase.from("projects").update({ status: "In Progress" }).eq("id", p.id).then(({ error }) => {
-                if (error) console.error("Error auto-activating existing project in Supabase:", error);
-              });
-
-              supabase.from("project_audit_logs").insert({
-                project_id: p.id,
-                user_name: "System",
-                from_status: p.status,
-                to_status: "In Progress",
-                comment: "Project activated automatically because an assigned task was found."
-              }).then(({ error }) => {
-                if (error) console.error("Error logging existing project transition:", error);
-              });
-
-              return {
-                ...p,
-                status: "In Progress" as const,
-                auditLog: [updatedLog, ...(p.auditLog || [])]
-              };
+      const dbProjectMembersMap: Record<string, string[]> = {};
+      const { data: dbAllocTable } = await supabase.from("resource_allocations").select("project_id, resource_id");
+      if (dbAllocTable) {
+        dbAllocTable.forEach(alloc => {
+          if (alloc.project_id && alloc.resource_id) {
+            const rName = resourceIdToName[alloc.resource_id];
+            if (rName) {
+              if (!dbProjectMembersMap[alloc.project_id]) {
+                dbProjectMembersMap[alloc.project_id] = [];
+              }
+              if (!dbProjectMembersMap[alloc.project_id].includes(rName)) {
+                dbProjectMembersMap[alloc.project_id].push(rName);
+              }
             }
           }
-          return p;
         });
+      }
 
-        const finalProjects = hasChanges ? activatedProjectsList : filteredProjects;
-        if (hasChanges) {
-          mappedProjects = mappedProjects.map(mp => {
-            const updated = finalProjects.find(up => up.id === mp.id);
-            return updated || mp;
-          });
-        }
+      let mappedProjects: Project[] = [];
+      if (dbProjects && dbProjects.length > 0) {
+        mappedProjects = dbProjects.map((p: any) => ({
+          id: p.id,
+          code: p.code,
+          name: p.name,
+          client: p.client,
+          organizationId: p.organization_id || "personal",
+          department: p.department || "Engineering",
+          budget: Number(p.budget),
+          spent: Number(p.spent),
+          startDate: p.start_date,
+          endDate: p.end_date,
+          priority: p.priority,
+          description: p.description || "",
+          projectManager: p.project_manager,
+          status: p.status,
+          teamMembers: dbProjectMembersMap[p.id] || [],
+          auditLog: []
+        }));
+      } else {
+        mappedProjects = initialProjects;
+        await seedInitialProjects(initialProjects);
+      }
 
-        setProjects(finalProjects);
-        setTasks(filteredTasks);
-        setLoadError(null);
+      let mappedTasks: WorkItem[] = [];
+      if (dbWorkItems && dbWorkItems.length > 0) {
+        mappedTasks = dbWorkItems.map((t: any) => ({
+          id: t.id,
+          projectId: t.project_id,
+          parentId: t.parent_id || undefined,
+          type: t.type,
+          title: t.title,
+          description: t.description || "",
+          status: t.status,
+          priority: t.priority,
+          assignee: t.assignee === "YOGESH VEL" || t.assignee?.toLowerCase() === "yogeshvel" ? "YOGESH VEL" : (t.assignee || undefined),
+          reporter: t.reporter,
+          reviewer: t.reviewer || undefined,
+          dueDate: t.due_date || undefined,
+          estimatedHours: Number(t.estimated_hours),
+          actualHours: Number(t.actual_hours),
+          tags: t.tags || [],
+          attachments: Array.isArray(t.attachments) ? t.attachments : [],
+          comments: Array.isArray(t.comments) ? t.comments.map((c: any) => ({
+            id: c.id,
+            author: c.author,
+            text: c.text,
+            createdAt: c.created_at
+          })) : [],
+          activityHistory: Array.isArray(t.activity_logs) ? t.activity_logs.map((log: any) => ({
+            id: log.id,
+            timestamp: log.timestamp,
+            user: log.user_name,
+            action: log.action
+          })) : [],
+          timerStartedAt: t.timer_started_at || undefined,
+          accumulatedSeconds: Number(t.accumulated_seconds || 0),
+          isDelayed: !!t.is_delayed,
+          performanceScore: t.performance_score !== null && t.performance_score !== undefined ? Number(t.performance_score) : undefined
+        }));
+      } else {
+        mappedTasks = initialTasks;
+        await seedInitialTasks(initialTasks);
+      }
+
+      if (typeof window !== "undefined") {
+        const localMembers = localStorage.getItem("nf_project_members");
+        const membersMap = localMembers ? JSON.parse(localMembers) : {};
+        mappedProjects = mappedProjects.map(p => {
+          const local = membersMap[p.id] || [];
+          const merged = new Set([
+            ...(p.teamMembers || []),
+            ...local
+          ]);
+          return {
+            ...p,
+            teamMembers: Array.from(merged)
+          };
+        });
+      }
+
+      const filteredProjects = mappedProjects.filter(p => p.organizationId === currentOrgId);
+      const visibleProjectIds = new Set(filteredProjects.map(p => p.id));
+      const filteredTasks = mappedTasks.filter(t => visibleProjectIds.has(t.projectId));
+
+      if (!isActive) return;
+
+      if (dbUsers) {
+        setUsers(dbUsers);
         if (typeof window !== "undefined") {
-          localStorage.setItem("nf_all_projects", JSON.stringify(mappedProjects));
-          localStorage.setItem("nf_all_tasks", JSON.stringify(mappedTasks));
-          localStorage.setItem("nf_projects", JSON.stringify(finalProjects));
-          localStorage.setItem("nf_tasks", JSON.stringify(filteredTasks));
+          localStorage.setItem("nf_users", JSON.stringify(dbUsers));
         }
-        setLoaded(true);
-
-      } catch (err: any) {
-        if (!active) return;
-        console.error("Failed to load from Supabase:", err);
-        setLoadError(err?.message || String(err));
-        loadFromLocalStorage();
-      }
-    }
-
-    function loadFromLocalStorage() {
-      if (!active) return;
-      const storedProj = localStorage.getItem("nf_all_projects") || localStorage.getItem("nf_projects");
-      const storedTasks = localStorage.getItem("nf_all_tasks") || localStorage.getItem("nf_tasks");
-      const localMembers = localStorage.getItem("nf_project_members");
-      const membersMap = localMembers ? JSON.parse(localMembers) : {};
-      
-      let mappedProj: Project[] = [];
-      if (storedProj) {
-        mappedProj = JSON.parse(storedProj);
-      } else {
-        mappedProj = initialProjects;
-      }
-      
-      // Ensure merged members are always set
-      mappedProj = mappedProj.map(p => ({
-        ...p,
-        teamMembers: p.teamMembers || membersMap[p.id] || []
-      }));
-
-      let mappedTasksList: WorkItem[] = [];
-      if (storedTasks) {
-        mappedTasksList = JSON.parse(storedTasks);
-      } else {
-        mappedTasksList = initialTasks;
       }
 
-      // Filter by organization context
-      const filteredProj = mappedProj.filter(p => p.organizationId === currentOrgId);
-      const visibleProjectIds = new Set(filteredProj.map(p => p.id));
-      const filteredTasksList = mappedTasksList.filter(t => visibleProjectIds.has(t.projectId));
-
-      const storedUsers = localStorage.getItem("nf_users");
-      if (storedUsers) {
-        setUsers(JSON.parse(storedUsers));
+      if (dbResources) {
+        const mappedResources = dbResources.map(r => ({
+          ...r,
+          id: r.id,
+          name: r.name,
+          email: r.email,
+          phone: r.phone,
+          role: r.role,
+          dept: r.dept,
+          manager: r.manager,
+          location: r.location,
+          employmentType: r.employment_type || "Full Time",
+          costRate: Number(r.cost_rate || 0),
+          billingRate: Number(r.billing_rate || 0),
+          currency: r.currency || "USD",
+          joiningDate: r.joining_date,
+          experienceYears: Number(r.experience_years || 0),
+          skills: typeof r.skills === "string" ? JSON.parse(r.skills) : (r.skills || []),
+          status: r.status,
+          util: Number(r.utilization_rate || 0),
+          availabilityHrsWk: Number(r.availability_hrs_wk || 40),
+          allocations: typeof r.allocations === "string" ? JSON.parse(r.allocations) : (r.allocations || []),
+          timesheets: typeof r.timesheets === "string" ? JSON.parse(r.timesheets) : (r.timesheets || [])
+        }));
+        setResources(mappedResources);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("nexus_resources_v2", JSON.stringify(mappedResources));
+        }
       }
 
-      // Check for existing projects that have assigned tasks but are not 'In Progress', and auto-transition them
+      if (dbRisks) {
+        const mappedRisks = dbRisks.map(r => ({
+          id: r.id,
+          name: r.name,
+          project: r.project,
+          severity: r.severity,
+          probability: r.probability,
+          impact: r.impact,
+          owner: r.owner,
+          status: r.status,
+          source: r.source,
+          description: r.description
+        }));
+        setRisks(mappedRisks);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("nexus_risks_v2", JSON.stringify(mappedRisks));
+        }
+      }
+
+      if (dbApprovals) {
+        const mappedApprovals = dbApprovals.map(a => ({
+          id: a.id,
+          type: a.type || a.title || "Change Request",
+          project: a.project_name || a.project || "Unknown Project",
+          requester: a.requester || "System User",
+          stage: a.status || a.stage || "Draft",
+          amount: Number(a.amount || 0),
+          submitted: a.created_at ? new Date(a.created_at).toLocaleDateString() : "Just now",
+          description: a.details || a.description || ""
+        }));
+        setApprovals(mappedApprovals);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("nexus_approvals", JSON.stringify(mappedApprovals));
+        }
+      }
+
+      if (dbAppAudits) setApprovalAuditLogs(dbAppAudits);
+      if (dbProjAudits) setProjectAuditLogs(dbProjAudits);
+      if (dbTaskAudits) setWorkItemActivityLogs(dbTaskAudits);
+
       let hasChanges = false;
-      const activatedProj = filteredProj.map(p => {
+      const activatedProjectsList = filteredProjects.map(p => {
         if (p.status !== "In Progress") {
-          const hasAssignedTask = filteredTasksList.some(t => t.projectId === p.id && t.assignee && t.assignee.trim() !== "");
+          const hasAssignedTask = filteredTasks.some(t => t.projectId === p.id && t.assignee && t.assignee.trim() !== "");
           if (hasAssignedTask) {
             hasChanges = true;
+            
             const updatedLog = {
               id: `p-log-${Date.now()}`,
               timestamp: new Date().toISOString(),
@@ -433,6 +420,21 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
               toStatus: "In Progress" as const,
               comment: "Project activated automatically because an assigned task was found."
             };
+
+            supabase.from("projects").update({ status: "In Progress" }).eq("id", p.id).then(({ error }) => {
+              if (error) console.error("Error auto-activating existing project in Supabase:", error);
+            });
+
+            supabase.from("project_audit_logs").insert({
+              project_id: p.id,
+              user_name: "System",
+              from_status: p.status,
+              to_status: "In Progress",
+              comment: "Project activated automatically because an assigned task was found."
+            }).then(({ error }) => {
+              if (error) console.error("Error logging existing project transition:", error);
+            });
+
             return {
               ...p,
               status: "In Progress" as const,
@@ -442,19 +444,231 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         }
         return p;
       });
-      const finalProj = hasChanges ? activatedProj : filteredProj;
 
-      setProjects(finalProj);
-      setTasks(filteredTasksList);
+      const finalProjects = hasChanges ? activatedProjectsList : filteredProjects;
+      if (hasChanges) {
+        mappedProjects = mappedProjects.map(mp => {
+          const updated = finalProjects.find(up => up.id === mp.id);
+          return updated || mp;
+        });
+      }
+
+      setProjects(finalProjects);
+      setTasks(filteredTasks);
+      setLoadError(null);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("nf_all_projects", JSON.stringify(mappedProjects));
+        localStorage.setItem("nf_all_tasks", JSON.stringify(mappedTasks));
+        localStorage.setItem("nf_projects", JSON.stringify(finalProjects));
+        localStorage.setItem("nf_tasks", JSON.stringify(filteredTasks));
+      }
       setLoaded(true);
+
+    } catch (err: any) {
+      if (!isActive) return;
+      console.error("Failed to load from Supabase:", err);
+      setLoadError(err?.message || String(err));
+      loadFromLocalStorage(isActive);
+    }
+  }
+
+  function loadFromLocalStorage(isActive = true) {
+    if (!isActive) return;
+    const storedProj = localStorage.getItem("nf_all_projects") || localStorage.getItem("nf_projects");
+    const storedTasks = localStorage.getItem("nf_all_tasks") || localStorage.getItem("nf_tasks");
+    const localMembers = localStorage.getItem("nf_project_members");
+    const membersMap = localMembers ? JSON.parse(localMembers) : {};
+    
+    let mappedProj: Project[] = [];
+    if (storedProj) {
+      mappedProj = JSON.parse(storedProj);
+    } else {
+      mappedProj = initialProjects;
+    }
+    
+    mappedProj = mappedProj.map(p => ({
+      ...p,
+      teamMembers: p.teamMembers || membersMap[p.id] || []
+    }));
+
+    let mappedTasksList: WorkItem[] = [];
+    if (storedTasks) {
+      mappedTasksList = JSON.parse(storedTasks);
+    } else {
+      mappedTasksList = initialTasks;
     }
 
-    loadData();
+    const filteredProj = mappedProj.filter(p => p.organizationId === currentOrgId);
+    const visibleProjectIds = new Set(filteredProj.map(p => p.id));
+    const filteredTasksList = mappedTasksList.filter(t => visibleProjectIds.has(t.projectId));
 
+    const storedUsers = localStorage.getItem("nf_users");
+    if (storedUsers) {
+      setUsers(JSON.parse(storedUsers));
+    }
+
+    const storedRes = localStorage.getItem("nexus_resources_v2");
+    if (storedRes) setResources(JSON.parse(storedRes));
+
+    const storedRisks = localStorage.getItem("nexus_risks_v2");
+    if (storedRisks) setRisks(JSON.parse(storedRisks));
+
+    const storedApprovals = localStorage.getItem("nexus_approvals");
+    if (storedApprovals) setApprovals(JSON.parse(storedApprovals));
+
+    let hasChanges = false;
+    const activatedProj = filteredProj.map(p => {
+      if (p.status !== "In Progress") {
+        const hasAssignedTask = filteredTasksList.some(t => t.projectId === p.id && t.assignee && t.assignee.trim() !== "");
+        if (hasAssignedTask) {
+          hasChanges = true;
+          const updatedLog = {
+            id: `p-log-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            user: "System",
+            fromStatus: p.status,
+            toStatus: "In Progress" as const,
+            comment: "Project activated automatically because an assigned task was found."
+          };
+          return {
+            ...p,
+            status: "In Progress" as const,
+            auditLog: [updatedLog, ...(p.auditLog || [])]
+          };
+        }
+      }
+      return p;
+    });
+    const finalProj = hasChanges ? activatedProj : filteredProj;
+
+    setProjects(finalProj);
+    setTasks(filteredTasksList);
+    setLoaded(true);
+  }
+
+  const refreshData = async () => {
+    await loadData(true);
+  };
+
+  useEffect(() => {
+    // Instantly hydrate UI state using local cache
+    loadFromLocalStorage(true);
+
+    let active = true;
+    loadData(active);
     return () => {
       active = false;
     };
   }, [user?.id, currentOrgId]);
+
+  // One-time self-healing sync of local project members to Supabase DB resource_allocations
+  useEffect(() => {
+    if (!loaded || !projects.length) return;
+
+    async function syncLocalMembersToDb() {
+      if (typeof window === "undefined") return;
+      const localMembers = localStorage.getItem("nf_project_members");
+      if (!localMembers) return;
+
+      try {
+        const membersMap = JSON.parse(localMembers);
+        const { data: dbRes } = await supabase.from("resources").select("*");
+        if (!dbRes) return;
+
+        for (const projectId of Object.keys(membersMap)) {
+          const members = membersMap[projectId];
+          if (!Array.isArray(members) || members.length === 0) continue;
+
+          const targetProj = projects.find(p => p.id === projectId);
+          if (!targetProj) continue;
+
+          // Get current DB allocations for this project
+          const { data: existingAllocs } = await supabase
+            .from("resource_allocations")
+            .select("resource_id")
+            .eq("project_id", projectId);
+
+          const existingResourceIds = new Set(existingAllocs?.map(a => a.resource_id) || []);
+
+          // Match local names to resource rows
+          const assignedResources = dbRes.filter(r => 
+            members.some(mName => mName.toLowerCase().trim() === r.name.toLowerCase().trim())
+          );
+
+          // Find resources that are not yet allocated in the database
+          const toAdd = assignedResources.filter(r => !existingResourceIds.has(r.id));
+
+          if (toAdd.length > 0) {
+            console.log(`[Self-Healing Sync] Syncing ${toAdd.length} local members for project ${projectId} to Supabase...`);
+            const allocationRows = toAdd.map(res => ({
+              id: `alloc-${projectId}-${res.id}`.slice(0, 50),
+              resource_id: res.id,
+              project_id: projectId,
+              project_name: targetProj.name,
+              role: res.role || "Team Member",
+              allocation_percent: 100,
+              start_date: targetProj.startDate || new Date().toISOString().split("T")[0],
+              end_date: targetProj.endDate || new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString().split("T")[0],
+              is_billable: true
+            }));
+
+            const { error } = await supabase.from("resource_allocations").upsert(allocationRows, { onConflict: "id" });
+            if (error) {
+              console.error("[Self-Healing Sync] Failed to sync local members to Supabase:", error);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[Self-Healing Sync] Failed to parse or sync local members:", err);
+      }
+    }
+
+    syncLocalMembersToDb();
+  }, [loaded, projects]);
+
+  // Proactive background task delay & performance check
+  useEffect(() => {
+    const interval = setInterval(() => {
+      let changed = false;
+      const now = new Date().getTime();
+      const updatedTasks = tasks.map(t => {
+        if (t.status === "In Progress" && t.timerStartedAt && t.estimatedHours && t.estimatedHours > 0) {
+          const elapsedSeconds = Math.round((now - new Date(t.timerStartedAt).getTime()) / 1000);
+          const totalSeconds = (t.accumulatedSeconds || 0) + elapsedSeconds;
+          const currentActualHours = Number((totalSeconds / 3600).toFixed(2));
+          if (currentActualHours > t.estimatedHours) {
+            const ratio = t.estimatedHours / currentActualHours;
+            const nextPerformanceScore = Math.max(30, Math.round(90 * ratio));
+            
+            if (!t.isDelayed || t.performanceScore !== nextPerformanceScore) {
+              changed = true;
+              
+              // Asynchronously update in Supabase
+              supabase.from("work_items").update({
+                is_delayed: true,
+                performance_score: nextPerformanceScore
+              }).eq("id", t.id).then(({ error }) => {
+                if (error) console.error("Error auto-updating task delay in Supabase:", error);
+              });
+
+              return {
+                ...t,
+                isDelayed: true,
+                performanceScore: nextPerformanceScore
+              };
+            }
+          }
+        }
+        return t;
+      });
+
+      if (changed) {
+        saveState(projects, updatedTasks);
+      }
+    }, 5000); // Check every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [tasks, projects]);
 
   // Save changes to state & localStorage
   const saveState = (updatedProj: Project[], updatedTasks: WorkItem[]) => {
@@ -592,37 +806,43 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     const updated = [newPrj, ...projects];
     saveState(updated, tasks);
 
-    // Save to Supabase
-    supabase.from("projects").insert({
-      id: newPrj.id,
-      code: newPrj.code,
-      name: newPrj.name,
-      client: newPrj.client,
-      organization_id: newPrj.organizationId,
-      department: newPrj.department,
-      budget: newPrj.budget,
-      spent: newPrj.spent,
-      start_date: newPrj.startDate,
-      end_date: newPrj.endDate,
-      priority: newPrj.priority,
-      description: newPrj.description,
-      project_manager: newPrj.projectManager,
-      status: newPrj.status
-    }).then(({ error }) => {
-      if (error) console.error("Error creating project in Supabase:", error);
+    const syncPromise = (async () => {
+      const { error: insertError } = await supabase.from("projects").insert({
+        id: newPrj.id,
+        code: newPrj.code,
+        name: newPrj.name,
+        client: newPrj.client,
+        organization_id: newPrj.organizationId,
+        department: newPrj.department,
+        budget: newPrj.budget,
+        spent: newPrj.spent,
+        start_date: newPrj.startDate,
+        end_date: newPrj.endDate,
+        priority: newPrj.priority,
+        description: newPrj.description,
+        project_manager: newPrj.projectManager,
+        status: newPrj.status
+      });
+      if (insertError) throw insertError;
+
+      const { error: logError } = await supabase.from("project_audit_logs").insert({
+        project_id: newPrj.id,
+        user_name: user?.fullName || user?.firstName || "System",
+        from_status: "None",
+        to_status: "Draft",
+        comment: "Project created as Draft"
+      });
+      if (logError) throw logError;
+
+      await refreshData();
+    })();
+
+    toast.promise(syncPromise, {
+      loading: `Creating project ${newPrj.code}...`,
+      success: `Project ${newPrj.code} created successfully!`,
+      error: (err) => `Failed to create project: ${err.message || String(err)}`
     });
 
-    supabase.from("project_audit_logs").insert({
-      project_id: newPrj.id,
-      user_name: user?.fullName || user?.firstName || "System",
-      from_status: "None",
-      to_status: "Draft",
-      comment: "Project created as Draft"
-    }).then(({ error }) => {
-      if (error) console.error("Error logging project creation:", error);
-    });
-
-    toast.success(`Project ${newPrj.code} created successfully!`);
     return newPrj;
   };
 
@@ -658,22 +878,28 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
     saveState(updated, tasks);
 
-    // Save to Supabase
-    supabase.from("projects").update({ status: toStatus }).eq("id", projectId).then(({ error }) => {
-      if (error) console.error("Error updating project status in Supabase:", error);
+    const syncPromise = (async () => {
+      const { error: updateError } = await supabase.from("projects").update({ status: toStatus }).eq("id", projectId);
+      if (updateError) throw updateError;
+
+      const { error: logError } = await supabase.from("project_audit_logs").insert({
+        project_id: projectId,
+        user_name: user?.fullName || user?.firstName || "System",
+        from_status: prj.status,
+        to_status: toStatus,
+        comment: comment || ""
+      });
+      if (logError) throw logError;
+
+      await refreshData();
+    })();
+
+    toast.promise(syncPromise, {
+      loading: `Updating project status to ${toStatus}...`,
+      success: `Project status successfully updated to ${toStatus}!`,
+      error: (err) => `Failed to update status: ${err.message || String(err)}`
     });
 
-    supabase.from("project_audit_logs").insert({
-      project_id: projectId,
-      user_name: user?.fullName || user?.firstName || "System",
-      from_status: prj.status,
-      to_status: toStatus,
-      comment: comment || ""
-    }).then(({ error }) => {
-      if (error) console.error("Error logging project transition:", error);
-    });
-
-    toast.success(`Project status transitioned to ${toStatus}`);
     return true;
   };
 
@@ -1039,8 +1265,19 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       }
       nextTimerStartedAt = undefined;
 
-      if (nextActualHours > t.estimatedHours) {
-        nextIsDelayed = true;
+      if (t.estimatedHours && t.estimatedHours > 0) {
+        if (nextActualHours > t.estimatedHours) {
+          nextIsDelayed = true;
+          const ratio = t.estimatedHours / nextActualHours;
+          nextPerformanceScore = Math.max(30, Math.round(90 * ratio));
+        } else {
+          const ratio = nextActualHours / t.estimatedHours;
+          if (ratio <= 0.5) {
+            nextPerformanceScore = 100;
+          } else {
+            nextPerformanceScore = Math.round(90 + 10 * (1 - (ratio - 0.5) / 0.5));
+          }
+        }
       }
     }
 
@@ -1132,7 +1369,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     return true;
   };
 
-  const updateProjectMembers = (projectId: string, members: string[]) => {
+  const updateProjectMembers = async (projectId: string, members: string[]) => {
     const updated = projects.map(p => {
       if (p.id === projectId) {
         return {
@@ -1150,6 +1387,64 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       const membersMap = localMembers ? JSON.parse(localMembers) : {};
       membersMap[projectId] = members;
       localStorage.setItem("nf_project_members", JSON.stringify(membersMap));
+    }
+
+    try {
+      const targetProj = projects.find(p => p.id === projectId);
+      if (targetProj) {
+        // Fetch all resources to map names to IDs
+        const { data: dbRes } = await supabase.from("resources").select("*");
+        if (dbRes) {
+          // Find matching resource IDs
+          const assignedResources = dbRes.filter(r => 
+            members.some(mName => mName.toLowerCase().trim() === r.name.toLowerCase().trim())
+          );
+
+          const assignedResourceIds = assignedResources.map(r => r.id);
+
+          // Delete allocations for resources that are no longer assigned to this project
+          const { data: existingAllocs } = await supabase
+            .from("resource_allocations")
+            .select("id, resource_id")
+            .eq("project_id", projectId);
+
+          const allocIdsToDelete = existingAllocs
+            ? existingAllocs.filter(a => !assignedResourceIds.includes(a.resource_id)).map(a => a.id)
+            : [];
+
+          if (allocIdsToDelete.length > 0) {
+            await supabase
+              .from("resource_allocations")
+              .delete()
+              .in("id", allocIdsToDelete);
+          }
+
+          // Upsert new allocations
+          if (assignedResources.length > 0) {
+            const allocationRows = assignedResources.map(res => ({
+              id: `alloc-${projectId}-${res.id}`.slice(0, 50),
+              resource_id: res.id,
+              project_id: projectId,
+              project_name: targetProj.name,
+              role: res.role || "Team Member",
+              allocation_percent: 100,
+              start_date: targetProj.startDate || new Date().toISOString().split("T")[0],
+              end_date: targetProj.endDate || new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString().split("T")[0],
+              is_billable: true
+            }));
+
+            const { error: upsertErr } = await supabase
+              .from("resource_allocations")
+              .upsert(allocationRows, { onConflict: "id" });
+
+            if (upsertErr) {
+              console.error("Error upserting resource allocations:", upsertErr);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to sync project members to Supabase:", err);
     }
 
     toast.success("Project team members updated successfully.");
@@ -1185,6 +1480,12 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         projects,
         tasks,
         users,
+        resources,
+        risks,
+        approvals,
+        approvalAuditLogs,
+        projectAuditLogs,
+        workItemActivityLogs,
         loaded,
         loadError,
         createProject,
@@ -1199,7 +1500,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         removeAttachmentFromTask,
         transitionTaskStatus,
         setOrganizationId,
-        currentOrgId
+        currentOrgId,
+        refreshData
       }}
     >
       {children}

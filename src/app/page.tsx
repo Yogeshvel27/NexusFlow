@@ -7,6 +7,7 @@ import { BarChart3, Users, Layers, Volume2, VolumeX } from "lucide-react";
 import { useSignIn, useSignUp, useAuth } from "@clerk/nextjs";
 import { toast } from "sonner";
 import logo from "@/components/asset/logo.png";
+import Image from "next/image";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -128,6 +129,7 @@ export default function LoginPage() {
             return;
           }
           toast.success("Welcome back!");
+          router.push("/dashboard");
         } else if (signIn.status === "needs_client_trust") {
           const emailCodeFactor = signIn.supportedSecondFactors?.find(
             (factor) => factor.strategy === "email_code",
@@ -184,6 +186,7 @@ export default function LoginPage() {
             return;
           }
           toast.success("Welcome back!");
+          router.push("/dashboard");
         } else {
           toast.info("Additional authentication steps are required to complete sign in.");
         }
@@ -217,6 +220,7 @@ export default function LoginPage() {
         }
 
         toast.success("Account created successfully!");
+        router.push("/dashboard");
       } else {
         toast.info("Verification incomplete. Please try again.");
       }
@@ -255,7 +259,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen w-full grid lg:grid-cols-2 bg-transparent">
+    <div className="min-h-screen lg:h-screen w-full grid lg:grid-cols-2 bg-transparent lg:overflow-hidden">
       {/* Left — luxury illustration */}
       <div className="relative hidden lg:flex flex-col justify-between p-12 overflow-hidden bg-sidebar text-white">
         <video 
@@ -284,7 +288,7 @@ export default function LoginPage() {
       </div>
 
       {/* Right — login card */}
-      <div className="relative flex items-center justify-center p-6 sm:p-12 bg-transparent min-h-screen">
+      <div className="relative flex items-center justify-center p-6 sm:p-12 lg:p-8 bg-transparent min-h-screen lg:h-full lg:min-h-0">
         {/* Minimized volume control button aligned properly in the right container */}
         <button
           onClick={(e) => {
@@ -300,7 +304,7 @@ export default function LoginPage() {
 
         <div className="custom-login-card">
           <div className="custom-logo-wrapper">
-            <img src={logo.src} className="h-30 w-auto object-contain mx-auto" alt="NexusFlow Logo" />
+            <Image src={logo} className="h-24 w-auto object-contain mx-auto" alt="NexusFlow Logo" priority />
           </div>
 
           {verifying ? (

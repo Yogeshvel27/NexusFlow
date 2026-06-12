@@ -21,7 +21,7 @@ export interface Project {
   priority: 'Low' | 'Medium' | 'High' | 'Critical';
   description: string;
   projectManager: string;
-  status: 'Draft' | 'Pending Approval' | 'Approved' | 'In Progress' | 'On Hold' | 'Delayed' | 'Completed' | 'Closed';
+  status: 'Draft' | 'Active' | 'Pending Approval' | 'Approved' | 'In Progress' | 'On Hold' | 'Delayed' | 'Completed' | 'Closed';
   auditLog: ProjectAuditLog[];
   teamMembers?: string[];
 }
@@ -81,27 +81,10 @@ export function validateTaskTransition(
   return { valid: true };
 }
 
-// Project lifecycle status transitions validation
 export function validateProjectTransition(
   from: Project['status'],
   to: Project['status']
 ): { valid: boolean; reason?: string } {
-  if (from === to) return { valid: true };
-
-  // Workflow: Draft -> Pending Approval -> Approved -> In Progress -> On Hold / Delayed / Completed -> Closed
-  if (from === 'Draft' && to !== 'Pending Approval') {
-    return { valid: false, reason: "Draft projects must be submitted for approval (Pending Approval)." };
-  }
-  if (from === 'Pending Approval' && to !== 'Approved' && to !== 'Draft') {
-    return { valid: false, reason: "Pending projects can only be Approved or sent back to Draft." };
-  }
-  if (from === 'Approved' && to !== 'In Progress' && to !== 'Draft') {
-    return { valid: false, reason: "Approved projects must be activated (In Progress) or returned to Draft." };
-  }
-  if (from === 'Closed') {
-    return { valid: false, reason: "Closed projects cannot be modified." };
-  }
-
   return { valid: true };
 }
 

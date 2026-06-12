@@ -20,7 +20,9 @@ import {
 } from "lucide-react";
 import { documents as initialMockDocuments } from "@/lib/mock";
 import { toast } from "sonner";
-import { supabase } from "@/lib/supabase";
+import { supabase, useSupabase } from "@/lib/supabase";
+import { useAuth, useUser } from "@clerk/nextjs";
+import { useWorkspace } from "@/context/WorkspaceContext";
 
 // ==========================================
 // TYPES
@@ -40,12 +42,52 @@ export interface RepoDocument {
 }
 
 function Documents() {
+  const { orgRole } = useAuth();
+  const { user } = useUser();
+  const { projects } = useWorkspace();
+  const { getAuthenticatedClient } = useSupabase();
+
+  const userName = user?.fullName || `${user?.firstName || ""} ${user?.lastName || ""}`.trim();
+
+  // Roles detection
+  const isSystemAdmin = !!(orgRole && (
+    orgRole.toLowerCase().includes("admin") ||
+    orgRole.toLowerCase().includes("it_administrators")
+  ));
+
+  const isProjectManager = !!(orgRole && orgRole.toLowerCase().includes("project_managers"));
+
+  const canAccessProjectFiles = !orgRole || [
+    "org:admin",
+    "org:it_administrators",
+    "org:project_managers",
+    "org:finance_team",
+    "org:executive_management",
+    "org:member",
+    "org:resource_managers"
+  ].includes(orgRole);
+
+  // Find projects managed by this user
+  const managedProjectNames = projects
+    .filter(p => p.projectManager && userName && (p.projectManager.toLowerCase() === userName.toLowerCase() || p.projectManager === userName))
+    .map(p => p.name);
+
   const [docs, setDocs] = useState<RepoDocument[]>([]);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [searchTerm, setSearchTerm] = useState("");
   
   // Folder Navigation state
-  const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  const [activeFolder, setActiveFolderState] = useState<string | null>(null);
+  const setActiveFolder = (val: string | null) => {
+    setActiveFolderState(val);
+    if (typeof window !== "undefined") {
+      if (val === null) {
+        localStorage.removeItem("nexus_doc_active_folder");
+      } else {
+        localStorage.setItem("nexus_doc_active_folder", val);
+      }
+    }
+  };
 
   // Modals state
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -54,17 +96,84 @@ function Documents() {
   // Form State for upload
   const [formName, setFormName] = useState("");
   const [formType, setFormType] = useState<RepoDocument['type']>("PDF");
-  const [formFolder, setFormFolder] = useState<RepoDocument['folder']>("Projects");
+  const [formFolder, setFormFolder] = useState<RepoDocument['folder']>(
+    canAccessProjectFiles ? "Projects" : "PMO Templates"
+  );
+
+  // Prevent System Admin or unauthorized role from manually accessing the Projects folder
+  useEffect(() => {
+    if (activeFolder === "Projects" && !canAccessProjectFiles) {
+      setActiveFolder(null);
+    }
+  }, [activeFolder, canAccessProjectFiles]);
+
+  // Sync default upload folder if access rights change
+  useEffect(() => {
+    if (!canAccessProjectFiles && formFolder === "Projects") {
+      setFormFolder("PMO Templates");
+    }
+  }, [canAccessProjectFiles, formFolder]);
+
+  const [selectedSubProject, setSelectedSubProjectState] = useState<string | null>(null);
+  const setSelectedSubProject = (val: string | null) => {
+    setSelectedSubProjectState(val);
+    if (typeof window !== "undefined") {
+      if (val === null) {
+        localStorage.removeItem("nexus_doc_subproject");
+      } else {
+        localStorage.setItem("nexus_doc_subproject", val);
+      }
+    }
+  };
+
+  // Safe client-side mount navigation restoration to prevent hydration mismatches
+  useEffect(() => {
+    const savedFolder = localStorage.getItem("nexus_doc_active_folder");
+    const savedSubProject = localStorage.getItem("nexus_doc_subproject");
+    if (savedFolder) {
+      setActiveFolderState(savedFolder);
+    }
+    if (savedSubProject) {
+      setSelectedSubProjectState(savedSubProject);
+    }
+  }, []);
+
+  // Projects to list as subfolders under "Projects"
+  const accessibleProjects = isProjectManager
+    ? projects.filter(p => p.projectManager && userName && (p.projectManager.toLowerCase() === userName.toLowerCase() || p.projectManager === userName))
+    : projects;
+
+  // Reset selected project subfolder if active folder changes
+  useEffect(() => {
+    if (activeFolder !== "Projects") {
+      setSelectedSubProject(null);
+    }
+  }, [activeFolder]);
+
   const [formProject, setFormProject] = useState("Atlas Banking Platform");
+
+  // Sync default upload project option
+  useEffect(() => {
+    if (selectedSubProject) {
+      setFormProject(selectedSubProject);
+    } else if (accessibleProjects.length > 0) {
+      setFormProject(accessibleProjects[0].name);
+    } else {
+      setFormProject("General PMO");
+    }
+  }, [selectedSubProject, accessibleProjects]);
+
   const [formSize, setFormSize] = useState("1.8 MB");
   const [formDesc, setFormDesc] = useState("");
 
   const [selectedFileName, setSelectedFileName] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setSelectedFile(file);
     setSelectedFileName(file.name);
 
     // Pre-fill Name (remove extension)
@@ -108,7 +217,8 @@ function Documents() {
   useEffect(() => {
     async function loadDocuments() {
       try {
-        const { data, error } = await supabase.from("documents").select("*");
+        const authClient = await getAuthenticatedClient();
+        const { data, error } = await authClient.from("documents").select("*");
         
         let currentDocs: RepoDocument[] = [];
         if (error || !data || data.length === 0) {
@@ -123,7 +233,11 @@ function Documents() {
             id: d.id,
             name: d.name,
             type: d.file_type as RepoDocument['type'],
-            size: d.file_size || "1.2 MB",
+            size: d.file_size 
+              ? (d.file_size >= 1 
+                ? `${d.file_size.toFixed(1)} MB` 
+                : `${Math.round(d.file_size * 1024)} KB`) 
+              : "1.2 MB",
             owner: d.uploaded_by || "PMO",
             updated: d.updated_at ? new Date(d.updated_at).toLocaleDateString() : "Just now",
             project: d.project_name || "General",
@@ -183,30 +297,21 @@ function Documents() {
     return mapped;
   };
 
-  const saveState = async (updated: RepoDocument[]) => {
+  const parseSizeToMb = (sizeStr: string): number => {
+    const num = parseFloat(sizeStr);
+    if (isNaN(num)) return 1.0;
+    if (sizeStr.toLowerCase().includes("kb")) {
+      return num / 1024;
+    }
+    if (sizeStr.toLowerCase().includes("gb")) {
+      return num * 1024;
+    }
+    return num;
+  };
+
+  const saveState = (updated: RepoDocument[]) => {
     setDocs(updated);
     localStorage.setItem("nexus_documents_v2", JSON.stringify(updated));
-
-    try {
-      const rows = updated.map(d => ({
-        id: d.id.includes("DOC-") ? undefined : d.id,
-        name: d.name,
-        file_path: d.filePath || `documents/${d.name}`,
-        file_type: d.type,
-        file_size: d.size,
-        folder: d.folder,
-        project_name: d.project,
-        uploaded_by: d.owner,
-        description: d.description
-      }));
-      
-      const validRows = rows.filter(r => r.id !== undefined);
-      if (validRows.length > 0) {
-        await supabase.from("documents").upsert(validRows);
-      }
-    } catch (err) {
-      console.error("Failed to upsert documents in Supabase:", err);
-    }
   };
 
   const iconFor = (t: RepoDocument['type']) => {
@@ -221,8 +326,12 @@ function Documents() {
   };
 
   // Upload Action
-  const handleUploadSubmit = (e: React.FormEvent) => {
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSystemAdmin) {
+      toast.error("System Administrators only have read access.");
+      return;
+    }
     if (!formName.trim()) {
       toast.error("Please enter a file name.");
       return;
@@ -243,17 +352,88 @@ function Documents() {
       finalName = finalName + targetExt;
     }
 
+    const newDocId = (() => {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) {
+        return crypto.randomUUID();
+      }
+      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        const v = c === "x" ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    })();
+
     const newDoc: RepoDocument = {
-      id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `doc-${Math.random().toString(36).substring(2, 11)}`,
+      id: newDocId,
       name: finalName,
       type: formType,
       size: formSize || "1.2 MB",
-      owner: "Yogesh V",
+      owner: userName || "Yogesh V",
       updated: new Date().toISOString().split("T")[0],
       project: formProject,
       folder: formFolder,
       description: formDesc || `Uploaded document for project ${formProject}.`
     };
+
+    // Get authenticated client first
+    const authClient = await getAuthenticatedClient();
+
+    let uploadedFilePath = `documents/${newDoc.name}`;
+    if (selectedFile) {
+      const fileExt = selectedFile.name.split(".").pop();
+      const pathInBucket = `${newDocId}.${fileExt}`;
+      
+      try {
+        const { error: uploadError } = await authClient.storage
+          .from("documents")
+          .upload(pathInBucket, selectedFile, {
+            cacheControl: '3600',
+            upsert: true
+          });
+
+        if (uploadError) {
+          console.error("Supabase storage upload error:", uploadError);
+          toast.error(`File upload to storage failed: ${uploadError.message}`);
+          return;
+        }
+        uploadedFilePath = pathInBucket;
+      } catch (err) {
+        console.error("Storage upload failed:", err);
+        toast.error("Failed to upload file to storage.");
+        return;
+      }
+    }
+
+    newDoc.filePath = uploadedFilePath;
+
+    // Save to database first
+    try {
+      const dbRow = {
+        id: newDoc.id,
+        name: newDoc.name,
+        file_path: uploadedFilePath,
+        file_type: newDoc.type,
+        file_size: parseSizeToMb(newDoc.size),
+        folder: newDoc.folder,
+        project_name: newDoc.project,
+        uploaded_by: newDoc.owner
+      };
+      
+      const { error } = await authClient.from("documents").insert(dbRow);
+      if (error) {
+        console.error("Supabase insert error:", error);
+        toast.error(`Database save failed: ${error.message}`);
+        if (selectedFile) {
+          await authClient.storage.from("documents").remove([uploadedFilePath]);
+        }
+        return;
+      }
+      console.log("Supabase insert succeeded!");
+    } catch (err) {
+      console.error("Failed to insert document in Supabase:", err);
+      toast.error("Failed to save document to database.");
+      return;
+    }
 
     const updated = [newDoc, ...docs];
     saveState(updated);
@@ -262,28 +442,72 @@ function Documents() {
     // Reset Form
     setFormName("");
     setFormDesc("");
+    setSelectedFile(null);
+    setSelectedFileName("");
 
     toast.success(`Successfully uploaded ${finalName} to ${formFolder}`);
   };
 
   // Delete Action
   const handleDeleteDoc = async (docId: string) => {
+    if (isSystemAdmin) {
+      toast.error("System Administrators only have read access.");
+      return;
+    }
+
+    const authClient = await getAuthenticatedClient();
+
+    if (!docId.includes("DOC-")) {
+      try {
+        // Find document and delete from storage first if applicable
+        const docToDelete = docs.find(d => d.id === docId);
+        if (docToDelete && docToDelete.filePath) {
+          await authClient.storage.from("documents").remove([docToDelete.filePath]);
+        }
+
+        const { error } = await authClient.from("documents").delete().eq("id", docId);
+        if (error) {
+          console.error("Failed to delete document from Supabase:", error);
+          toast.error(`Failed to delete document from database: ${error.message}`);
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to delete document from Supabase:", err);
+        toast.error("Failed to delete document from database.");
+        return;
+      }
+    }
+
     const updated = docs.filter(d => d.id !== docId);
     saveState(updated);
     setSelectedDoc(null);
     toast.success("Document removed from repository.");
-
-    if (!docId.includes("DOC-")) {
-      try {
-        await supabase.from("documents").delete().eq("id", docId);
-      } catch (err) {
-        console.error("Failed to delete document from Supabase:", err);
-      }
-    }
   };
 
   // Move folder action
-  const handleMoveFolder = (docId: string, destFolder: RepoDocument['folder']) => {
+  const handleMoveFolder = async (docId: string, destFolder: RepoDocument['folder']) => {
+    if (isSystemAdmin) {
+      toast.error("System Administrators only have read access.");
+      return;
+    }
+
+    const authClient = await getAuthenticatedClient();
+
+    if (!docId.includes("DOC-")) {
+      try {
+        const { error } = await authClient.from("documents").update({ folder: destFolder }).eq("id", docId);
+        if (error) {
+          console.error("Failed to update folder in Supabase:", error);
+          toast.error(`Failed to move folder in database: ${error.message}`);
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to update folder in Supabase:", err);
+        toast.error("Failed to save changes to database.");
+        return;
+      }
+    }
+
     const updated = docs.map(d => d.id === docId ? { ...d, folder: destFolder } : d);
     saveState(updated);
     if (selectedDoc) {
@@ -292,13 +516,45 @@ function Documents() {
     toast.success(`Moved document to folder: ${destFolder}`);
   };
 
-  // Download simulation
-  const handleDownload = (name: string) => {
+  // Download Handler
+  const handleDownload = async (doc: RepoDocument) => {
+    if (doc.filePath && !doc.id.includes("DOC-")) {
+      try {
+        const authClient = await getAuthenticatedClient();
+        const { data, error } = await authClient.storage
+          .from("documents")
+          .download(doc.filePath);
+          
+        if (error) {
+          console.error("Storage download error:", error);
+          toast.error(`Download failed: ${error.message}`);
+          return;
+        }
+        
+        if (data) {
+          const url = window.URL.createObjectURL(data);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = doc.name;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          a.remove();
+          toast.success(`Downloaded ${doc.name} successfully!`);
+        }
+      } catch (err) {
+        console.error("Download failed:", err);
+        toast.error("Download failed.");
+      }
+      return;
+    }
+
+    // Fallback simulation for mock documents
     toast.promise(
       new Promise((resolve) => setTimeout(resolve, 1000)),
       {
-        loading: `Preparing download file: ${name}...`,
-        success: `Downloaded ${name} successfully!`,
+        loading: `Preparing download file: ${doc.name}...`,
+        success: `Downloaded ${doc.name} successfully!`,
         error: "Download failed."
       }
     );
@@ -306,6 +562,22 @@ function Documents() {
 
   // Filter logs
   const filteredDocs = docs.filter(d => {
+    // Hide Projects files if user is not allowed to access them
+    if (d.folder === "Projects" && !canAccessProjectFiles) {
+      return false;
+    }
+
+    // If active folder is Projects:
+    // If a subproject is selected, show only documents belonging to that project
+    if (d.folder === "Projects" && activeFolder === "Projects") {
+      if (selectedSubProject) {
+        if (d.project !== selectedSubProject) return false;
+      } else {
+        // If no subproject is selected yet, we shouldn't show files (we show folders instead)
+        return false;
+      }
+    }
+
     const matchesSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           d.project.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           d.owner.toLowerCase().includes(searchTerm.toLowerCase());
@@ -315,11 +587,20 @@ function Documents() {
 
   // Calculate folder counts dynamically
   const getFolderCount = (folderName: string) => {
-    return docs.filter(d => d.folder === folderName).length;
+    return docs.filter(d => {
+      if (d.folder !== folderName) return false;
+      if (d.folder === "Projects" && !canAccessProjectFiles) return false;
+      if (d.folder === "Projects" && isProjectManager && userName) {
+        return managedProjectNames.includes(d.project);
+      }
+      return true;
+    }).length;
   };
 
   // Calculate aggregate space
   const totalGb = (3.2 + (docs.length * 0.046)).toFixed(1);
+
+  const showProjectFolders = activeFolder === "Projects" && !selectedSubProject;
 
   return (
     <div className="space-y-6">
@@ -329,16 +610,18 @@ function Documents() {
           <h1 className="text-[28px] font-semibold tracking-tight">Document Repository</h1>
           <p className="text-sm text-muted-foreground mt-1">{docs.length} documents · {totalGb} GB across all projects</p>
         </div>
-        <button 
-          onClick={() => setIsUploadOpen(true)}
-          className="h-10 px-4 rounded-xl bg-gradient-to-r from-primary to-accent text-white text-sm font-medium shadow-copper inline-flex items-center gap-2 hover:opacity-90 transition cursor-pointer"
-        >
-          <Upload className="size-4" />Upload Files
-        </button>
+        {!isSystemAdmin && (
+          <button 
+            onClick={() => setIsUploadOpen(true)}
+            className="h-10 px-4 rounded-xl bg-gradient-to-r from-primary to-accent text-white text-sm font-medium shadow-copper inline-flex items-center gap-2 hover:opacity-90 transition cursor-pointer"
+          >
+            <Upload className="size-4" />Upload Files
+          </button>
+        )}
       </div>
 
       {/* Folders Navigation Row */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className={`grid grid-cols-2 ${canAccessProjectFiles ? "md:grid-cols-5" : "md:grid-cols-4"} gap-3`}>
         {[
           { name: "Projects" },
           { name: "PMO Templates" },
@@ -346,6 +629,8 @@ function Documents() {
           { name: "Compliance" },
           { name: "Architecture" }
         ].map((f) => {
+          if (f.name === "Projects" && !canAccessProjectFiles) return null;
+
           const isSelected = activeFolder === f.name;
           const count = getFolderCount(f.name);
           return (
@@ -374,11 +659,31 @@ function Documents() {
       <div className="bg-card border border-border rounded-2xl shadow-card overflow-hidden">
         {/* Navigation Breadcrumb & Search Actions */}
         <div className="px-5 py-4 border-b border-border bg-secondary/10 flex flex-col md:flex-row items-center gap-3">
-          <div className="mr-auto text-xs text-muted-foreground">
-            All Files {activeFolder && (
+          <div className="mr-auto text-xs text-muted-foreground flex items-center gap-1">
+            <button 
+              onClick={() => {
+                setActiveFolder(null);
+                setSelectedSubProject(null);
+              }}
+              className="hover:text-primary transition font-medium"
+            >
+              All Files
+            </button>
+            {activeFolder && (
               <>
-                <span className="mx-1.5">›</span>
-                <span className="text-primary font-bold bg-primary/10 px-2 py-0.5 rounded-md">{activeFolder}</span>
+                <span className="mx-1 text-muted-foreground/50">›</span>
+                <button 
+                  onClick={() => setSelectedSubProject(null)}
+                  className={`hover:text-primary transition font-bold px-2 py-0.5 rounded-md ${!selectedSubProject ? "text-primary bg-primary/10" : "text-muted-foreground/85 hover:bg-secondary/50"}`}
+                >
+                  {activeFolder}
+                </button>
+              </>
+            )}
+            {selectedSubProject && (
+              <>
+                <span className="mx-1 text-muted-foreground/50">›</span>
+                <span className="text-primary font-bold bg-primary/10 px-2 py-0.5 rounded-md">{selectedSubProject}</span>
               </>
             )}
           </div>
@@ -410,7 +715,50 @@ function Documents() {
         </div>
 
         {/* Dynamic List or Grid Toggle Content */}
-        {view === "grid" ? (
+        {showProjectFolders ? (
+          <div className="p-5 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+            {accessibleProjects.map((proj) => {
+              const docCount = docs.filter(d => d.project === proj.name).length;
+              return (
+                <div
+                  key={proj.id}
+                  onClick={() => setSelectedSubProject(proj.name)}
+                  className="group rounded-2xl border border-border p-5 hover:border-primary/40 hover:shadow-card hover:-translate-y-0.5 transition-all cursor-pointer bg-card/60 relative overflow-hidden flex flex-col justify-between min-h-[140px]"
+                >
+                  <div>
+                    <div className="flex items-start justify-between">
+                      <div className="size-10 rounded-xl bg-gradient-to-br from-primary/10 to-accent/5 text-primary grid place-items-center mb-3 group-hover:bg-primary group-hover:text-white transition-all duration-300">
+                        <Folder className="size-5" />
+                      </div>
+                      <span className="text-[9px] font-bold text-muted-foreground bg-secondary/80 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                        {proj.code || "Project"}
+                      </span>
+                    </div>
+                    <h3 className="font-semibold text-foreground text-xs group-hover:text-primary transition-colors line-clamp-1 mt-1">
+                      {proj.name}
+                    </h3>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
+                      Manager: {proj.projectManager || "None"}
+                    </p>
+                  </div>
+                  <div className="mt-3 pt-2.5 border-t border-border/60 flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>{docCount} {docCount === 1 ? "doc" : "docs"}</span>
+                    <span className="text-primary opacity-0 group-hover:opacity-100 transition-opacity font-medium inline-flex items-center gap-0.5">
+                      Open →
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            {accessibleProjects.length === 0 && (
+              <div className="col-span-full py-16 text-center">
+                <Folder className="size-10 text-muted-foreground/30 mx-auto mb-3" />
+                <h3 className="font-medium text-foreground text-sm">No Projects Found</h3>
+                <p className="text-xs text-muted-foreground mt-1">You are not assigned to any active projects.</p>
+              </div>
+            )}
+          </div>
+        ) : view === "grid" ? (
           <div className="p-5 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
             {filteredDocs.map((d) => (
               <div 
@@ -562,7 +910,7 @@ function Documents() {
                     onChange={(e) => setFormFolder(e.target.value as any)}
                     className="w-full h-9 px-2 border border-border rounded-xl bg-secondary/50"
                   >
-                    <option value="Projects">Projects</option>
+                    {canAccessProjectFiles && <option value="Projects">Projects</option>}
                     <option value="PMO Templates">PMO Templates</option>
                     <option value="Finance">Finance</option>
                     <option value="Compliance">Compliance</option>
@@ -579,10 +927,9 @@ function Documents() {
                     onChange={(e) => setFormProject(e.target.value)}
                     className="w-full h-9 px-2 border border-border rounded-xl bg-secondary/50"
                   >
-                    <option value="Atlas Banking Platform">Atlas Banking Platform</option>
-                    <option value="Helix CRM Migration">Helix CRM Migration</option>
-                    <option value="Nimbus Data Lake">Nimbus Data Lake</option>
-                    <option value="Mosaic Mobile Suite">Mosaic Mobile Suite</option>
+                    {accessibleProjects.map((p) => (
+                      <option key={p.id} value={p.name}>{p.name}</option>
+                    ))}
                     <option value="General PMO">General PMO</option>
                   </select>
                 </div>
@@ -689,9 +1036,10 @@ function Documents() {
                 <select 
                   value={selectedDoc.folder}
                   onChange={(e) => handleMoveFolder(selectedDoc.id, e.target.value as any)}
-                  className="w-full h-9 px-2 border border-border rounded-xl bg-secondary/50"
+                  disabled={isSystemAdmin}
+                  className="w-full h-9 px-2 border border-border rounded-xl bg-secondary/50 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <option value="Projects">Projects</option>
+                  {canAccessProjectFiles && <option value="Projects">Projects</option>}
                   <option value="PMO Templates">PMO Templates</option>
                   <option value="Finance">Finance</option>
                   <option value="Compliance">Compliance</option>
@@ -711,19 +1059,21 @@ function Documents() {
             {/* Actions Panel */}
             <div className="p-6 border-t border-border bg-secondary/5 flex gap-2">
               <button 
-                onClick={() => handleDownload(selectedDoc.name)}
+                onClick={() => handleDownload(selectedDoc)}
                 className="w-full h-10 rounded-xl bg-primary text-white text-xs font-semibold shadow-copper hover:opacity-90 transition inline-flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Download className="size-4" />Download File
               </button>
               
-              <button 
-                onClick={() => handleDeleteDoc(selectedDoc.id)}
-                className="h-10 px-3 rounded-xl border border-red-200 text-red-500 hover:bg-red-500/10 transition inline-flex items-center justify-center cursor-pointer"
-                title="Delete document permanently"
-              >
-                <Trash2 className="size-4" />
-              </button>
+              {!isSystemAdmin && (
+                <button 
+                  onClick={() => handleDeleteDoc(selectedDoc.id)}
+                  className="h-10 px-3 rounded-xl border border-red-200 text-red-500 hover:bg-red-500/10 transition inline-flex items-center justify-center cursor-pointer"
+                  title="Delete document permanently"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              )}
             </div>
           </div>
         </div>

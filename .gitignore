@@ -30,3 +30,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Next.js build output
+.next/
+
+# Temporary scratch scripts
+scratch/
+
+# TypeScript build info cache
+tsconfig.tsbuildinfo

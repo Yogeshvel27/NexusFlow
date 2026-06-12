@@ -5,12 +5,24 @@ import {
   Search, Plus, Download, X, Briefcase, Award, DollarSign, Calendar, 
   BarChart3, CheckCircle, AlertCircle, Clock, PieChart as PieIcon, 
   UserCheck, RefreshCw, Layers, ShieldAlert, ArrowRight, UserPlus,
-  Eye, Sparkles, ChevronDown, User
+  Eye, Sparkles, ChevronDown, User, Cloud, Wrench, Server, Tag, FileText,
+  Folder, FolderOpen, ChevronRight
 } from "lucide-react";
 import { StatusChip } from "@/components/status-chip";
 import { ProgressBar } from "@/components/progress-bar";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
+import { useUser, useAuth } from "@clerk/nextjs";
+import { useWorkspace } from "@/context/WorkspaceContext";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
   ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Legend 
@@ -283,13 +295,338 @@ const INITIAL_RESOURCES: Resource[] = [
 
 const ALL_SKILLS = ["React", "Node.js", "Java", "Python", "AWS", "Azure", "DevOps", "Figma", "SQL", "Power BI"];
 
+const DESIGNATION_OPTIONS = [
+  { value: "Other Cloud Service", label: "Other Cloud Service (Cloud)" },
+  { value: "AWS EC2 Instance", label: "AWS EC2 Instance (VM)" },
+  { value: "AWS S3 Storage", label: "AWS S3 Storage (Storage)" },
+  { value: "AWS RDS Database", label: "AWS RDS Database (Database)" },
+  { value: "GCP Compute VM", label: "GCP Compute VM (VM)" },
+  { value: "Azure Virtual Machine", label: "Azure Virtual Machine (VM)" },
+  { value: "OpenAI API Service", label: "OpenAI API Service (API)" },
+  { value: "Frontend Engineer", label: "Frontend Engineer (Human)" },
+  { value: "Backend Engineer", label: "Backend Engineer (Human)" },
+  { value: "Product Designer", label: "Product Designer (Human)" },
+];
+
+const DEPT_OPTIONS = [
+  { value: "Engineering", label: "Engineering" },
+  { value: "Operations", label: "Operations" },
+  { value: "Finance", label: "Finance" },
+  { value: "HR", label: "HR" },
+];
+
+const MANAGER_OPTIONS = [
+  { value: "Yogesh V", label: "Yogesh V" },
+  { value: "Alex Rivera", label: "Alex Rivera" },
+  { value: "Sarah Chen", label: "Sarah Chen" },
+  { value: "Marcus Vance", label: "Marcus Vance" },
+  { value: "Elena Rostova", label: "Elena Rostova" },
+];
+
+const STATUS_OPTIONS = [
+  { value: "Available", label: "Active / Available" },
+  { value: "On Bench", label: "On Bench" },
+  { value: "Fully Allocated", label: "Fully Allocated" },
+  { value: "Terminated", label: "Terminated" },
+];
+
+const PROJECT_OPTIONS = [
+  { value: "UVANTHU", label: "UVANTHU" },
+  { value: "Atlas Banking Platform", label: "Atlas Banking Platform" },
+  { value: "Helix CRM Migration", label: "Helix CRM Migration" },
+  { value: "Nimbus Data Lake", label: "Nimbus Data Lake" },
+  { value: "Mosaic Mobile Suite", label: "Mosaic Mobile Suite" },
+  { value: "Lumen Customer 360", label: "Lumen Customer 360" },
+];
+
+const CURRENCY_OPTIONS = [
+  { value: "USD", label: "USD ($)" },
+  { value: "EUR", label: "EUR (€)" },
+  { value: "GBP", label: "GBP (£)" },
+];
+
+const CATEGORY_OPTIONS = [
+  { value: "VM", label: "VM" },
+  { value: "Storage", label: "Storage" },
+  { value: "Database", label: "Database" },
+  { value: "Cache", label: "Cache" },
+  { value: "LLM", label: "LLM" },
+  { value: "SaaS API", label: "SaaS API" },
+  { value: "Human", label: "Human" },
+];
+
+const PROFICIENCY_OPTIONS = [
+  { value: "Beginner", label: "Beginner" },
+  { value: "Intermediate", label: "Intermediate" },
+  { value: "Advanced", label: "Advanced" },
+  { value: "Expert", label: "Expert" },
+  { value: "Architect", label: "Architect" },
+];
+
+interface DarkSelectProps {
+  value: string;
+  onValueChange: (val: string) => void;
+  placeholder?: string;
+  leftIcon?: React.ReactNode;
+  options: { value: string; label: string }[];
+  size?: "sm" | "md";
+}
+
+function DarkSelect({ value, onValueChange, placeholder, leftIcon, options, size = "md" }: DarkSelectProps) {
+  const isSm = size === "sm";
+  return (
+    <div className="relative">
+      {leftIcon && (
+        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none z-10">
+          {leftIcon}
+        </span>
+      )}
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger className={cn(
+          "w-full bg-stone-900/40 border border-white/5 text-stone-100 focus:ring-1 focus:ring-[#C8844A] focus:border-[#C8844A]/50 focus:ring-offset-0 focus:outline-none transition-all duration-200 select-none",
+          isSm ? "h-9 px-2 rounded-lg text-xs" : "h-11 rounded-xl text-xs",
+          leftIcon ? (isSm ? "pl-8" : "pl-10") : (isSm ? "pl-2.5" : "pl-3.5")
+        )}>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent className="bg-[#0D0D0D] border border-white/10 text-stone-100 shadow-2xl">
+          {options.map((opt) => (
+            <SelectItem 
+              key={opt.value} 
+              value={opt.value}
+              className="focus:bg-[#C8844A]/10 focus:text-[#C8844A] text-stone-300 hover:text-white cursor-pointer transition-colors duration-150 text-xs"
+            >
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+async function syncRelatedTables(updated: Resource[]) {
+  try {
+    const resourceIds = updated.map(r => r.id);
+    if (resourceIds.length === 0) return;
+
+    // Fetch existing projects from the DB to validate and correct foreign keys
+    const { data: dbProjects } = await supabase.from("projects").select("id, name");
+    const projectIds = new Set(dbProjects ? dbProjects.map(p => p.id) : []);
+    const projectNamesMap = new Map(dbProjects ? dbProjects.map(p => [p.name, p.id]) : []);
+
+    const allAllocationsRows: any[] = [];
+    const timesheetRows: any[] = [];
+    const resourceTimesheetRows: any[] = [];
+
+    updated.forEach(res => {
+      if (Array.isArray(res.allocations)) {
+        res.allocations.forEach((alloc: any) => {
+          let projId = alloc.projectId;
+          if (projId && !projectIds.has(projId) && projectNamesMap.has(alloc.projectName)) {
+            projId = projectNamesMap.get(alloc.projectName);
+          }
+
+          if (projId && projectIds.has(projId)) {
+            const uniqueAllocId = `${alloc.id}-${res.id}`;
+            allAllocationsRows.push({
+              id: uniqueAllocId,
+              resource_id: res.id,
+              project_id: projId,
+              project_name: alloc.projectName,
+              role: alloc.role || "Resource",
+              allocation_percent: Number(alloc.allocationPercent || 100),
+              start_date: alloc.startDate,
+              end_date: alloc.endDate || "2026-12-31",
+              is_billable: alloc.isBillable !== false
+            });
+          }
+        });
+      }
+
+      if (Array.isArray(res.timesheets)) {
+        res.timesheets.forEach((ts: any) => {
+          let dbStatus = "Pending";
+          if (ts.status === "Approved" || ts.status === "Locked") {
+            dbStatus = "Approved";
+          } else if (ts.status === "Rejected") {
+            dbStatus = "Rejected";
+          }
+
+          let projId = ts.projectId;
+          if (projId && !projectIds.has(projId) && projectNamesMap.has(ts.projectName)) {
+            projId = projectNamesMap.get(ts.projectName);
+          }
+
+          if (projId && projectIds.has(projId)) {
+            const uniqueTsId = `${ts.id}-${res.id}`;
+            timesheetRows.push({
+              id: uniqueTsId,
+              resource_id: res.id,
+              project_id: projId,
+              project_name: ts.projectName,
+              task_name: ts.taskName,
+              date: ts.date,
+              hours: Number(ts.hours),
+              is_billable: !!ts.isBillable,
+              comments: ts.comments || "",
+              status: dbStatus
+            });
+
+            resourceTimesheetRows.push({
+              id: uniqueTsId,
+              resource_id: res.id,
+              project_id: projId,
+              date: ts.date,
+              hours: Number(ts.hours),
+              description: ts.taskName || ts.comments || "",
+              status: ts.status || "Submitted"
+            });
+          }
+        });
+      }
+    });
+
+    await supabase.from("resource_allocations").delete().in("resource_id", resourceIds);
+    if (allAllocationsRows.length > 0) {
+      const { error: allocError } = await supabase
+        .from("resource_allocations")
+        .upsert(allAllocationsRows, { onConflict: "id" });
+      if (allocError) {
+        console.error("Failed to sync to resource_allocations:", {
+          message: allocError.message,
+          details: allocError.details,
+          hint: allocError.hint,
+          code: allocError.code
+        });
+      }
+    }
+
+    await supabase.from("timesheets").delete().in("resource_id", resourceIds);
+    if (timesheetRows.length > 0) {
+      const { error: tsError } = await supabase
+        .from("timesheets")
+        .upsert(timesheetRows, { onConflict: "id" });
+      if (tsError) {
+        console.error("Failed to sync to timesheets:", {
+          message: tsError.message,
+          details: tsError.details,
+          hint: tsError.hint,
+          code: tsError.code
+        });
+      }
+    }
+
+    await supabase.from("resource_timesheets").delete().in("resource_id", resourceIds);
+    if (resourceTimesheetRows.length > 0) {
+      const { error: rtsError } = await supabase
+        .from("resource_timesheets")
+        .upsert(resourceTimesheetRows, { onConflict: "id" });
+      if (rtsError) {
+        console.error("Failed to sync to resource_timesheets:", {
+          message: rtsError.message,
+          details: rtsError.details,
+          hint: rtsError.hint,
+          code: rtsError.code
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Failed to sync related tables:", err);
+  }
+}
+
+function isHumanResource(r: Resource): boolean {
+  if (r.location === "Human") return true;
+  
+  const roleLower = (r.role || "").toLowerCase();
+  if (
+    roleLower.includes("instance") ||
+    roleLower.includes("service") ||
+    roleLower.includes("cluster") ||
+    roleLower.includes("cache") ||
+    roleLower.includes("bucket") ||
+    roleLower.includes("machine") ||
+    roleLower.includes("account") ||
+    roleLower.includes("balancer") ||
+    roleLower.includes("api")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function notifyITAdminOfAllocation(
+  resourceName: string,
+  projectName: string,
+  managerName: string,
+  role: string
+) {
+  try {
+    const { data: admins } = await supabase
+      .from("users")
+      .select("email")
+      .or("role.eq.IT Administrator,role.eq.Admin,role.eq.IT Administrators");
+
+    const adminEmails = admins && admins.length > 0
+      ? admins.map(u => u.email)
+      : ["gnmhs123@gmail.com"];
+
+    for (const email of adminEmails) {
+      await fetch("/api/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: email,
+          employeeName: resourceName,
+          projectName: projectName,
+          projectManager: managerName,
+          projectRole: role,
+          notificationType: "allocation"
+        })
+      });
+    }
+  } catch (err) {
+    console.error("Failed to notify IT Admin of allocation:", err);
+  }
+}
+
 // ==========================================
 // MAIN COMPONENT
 // ==========================================
 
 export default function ResourceModule() {
+  const { user } = useUser();
+  const { orgRole } = useAuth();
+  
+  const canAddResource = !orgRole || (
+    orgRole === "org:admin" ||
+    orgRole === "org:resource_managers" ||
+    orgRole === "org:executive_management" ||
+    orgRole === "org:it_administrators"
+  );
+  const { projects, updateProjectBudget, resources: dbResources, refreshData } = useWorkspace();
   const [resources, setResources] = useState<Resource[]>([]);
-  const [activeTab, setActiveTab] = useState<"directory" | "matrix" | "planner" | "timesheets" | "billing" | "analytics">("directory");
+  const [currentPageDirectory, setCurrentPageDirectory] = useState(1);
+  const [currentPageBench, setCurrentPageBench] = useState(1);
+
+  const allBenchResources = React.useMemo(() => {
+    return [...resources]
+      .filter(r => r.status === "Bench" || r.status === "Available")
+      .sort((a, b) => {
+        const dateA = new Date(a.joiningDate || 0).getTime();
+        const dateB = new Date(b.joiningDate || 0).getTime();
+        if (dateA !== dateB) return dateB - dateA;
+        return b.id.localeCompare(a.id);
+      });
+  }, [resources]);
+
+  const benchResources = React.useMemo(() => {
+    const startIndex = (currentPageBench - 1) * 5;
+    return allBenchResources.slice(startIndex, startIndex + 5);
+  }, [allBenchResources, currentPageBench]);
+  const [activeTab, setActiveTab] = useState<"directory" | "timesheets" | "billing">("directory");
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   
   // Search & Filtering State
   const [searchQuery, setSearchQuery] = useState("");
@@ -297,6 +634,15 @@ export default function ResourceModule() {
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterType, setFilterType] = useState("All");
   const [sortBy, setSortBy] = useState<"utilization" | "experience" | "name">("name");
+
+  // Reset page numbers when search/filters change
+  useEffect(() => {
+    setCurrentPageDirectory(1);
+  }, [searchQuery, filterDept, filterStatus, filterType, sortBy]);
+
+  useEffect(() => {
+    setCurrentPageBench(1);
+  }, [resources]);
 
   // Profile Drawer State
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
@@ -346,97 +692,68 @@ export default function ResourceModule() {
   const [allocRemarks, setAllocRemarks] = useState("");
 
   // Timesheet Submission State
-  const [timesheetProject, setTimesheetProject] = useState("Atlas Banking Platform");
+  const [timesheetProject, setTimesheetProject] = useState("");
   const [timesheetTask, setTimesheetTask] = useState("");
   const [timesheetHours, setTimesheetHours] = useState("8");
   const [timesheetBillable, setTimesheetBillable] = useState(true);
   const [timesheetComments, setTimesheetComments] = useState("");
   const [timesheetResourceEmail, setTimesheetResourceEmail] = useState("");
 
+  // User role state
+  const [userRole, setUserRole] = useState<string>("Team Member");
+
+  useEffect(() => {
+    async function fetchUserRole() {
+      if (user?.primaryEmailAddress?.emailAddress) {
+        const { data, error } = await supabase
+          .from("users")
+          .select("role")
+          .eq("email", user.primaryEmailAddress.emailAddress)
+          .maybeSingle();
+        if (data && !error) {
+          setUserRole(data.role);
+        }
+      }
+    }
+    fetchUserRole();
+  }, [user]);
+
+  const filteredTimesheetProjects = React.useMemo(() => {
+    const isAdmin = userRole.toLowerCase().includes("admin");
+    if (isAdmin) {
+      return projects;
+    }
+    if (userRole === "Project Manager") {
+      return projects.filter(p => p.projectManager === user?.fullName);
+    }
+    return projects;
+  }, [projects, userRole, user?.fullName]);
+
+  useEffect(() => {
+    if (filteredTimesheetProjects.length > 0 && !filteredTimesheetProjects.some(p => p.name === timesheetProject)) {
+      setTimesheetProject(filteredTimesheetProjects[0].name);
+    }
+  }, [filteredTimesheetProjects, timesheetProject]);
+
   // Skill recommendation state
   const [skillSearch, setSkillSearch] = useState("");
   const [skillLevelReq, setSkillLevelReq] = useState<Skill['level'] | "Any">("Any");
 
-  // Load state from Supabase, with local storage fallback
+  // Initialize and keep local state in sync with context cache
   useEffect(() => {
-    async function loadResources() {
-      try {
-        const { data, error } = await supabase.from("resources").select("*");
-        if (error || !data || data.length === 0) {
-          const saved = localStorage.getItem("nexus_resources_v2");
-          if (saved) {
-            setResources(JSON.parse(saved));
-          } else {
-            setResources(INITIAL_RESOURCES);
-            localStorage.setItem("nexus_resources_v2", JSON.stringify(INITIAL_RESOURCES));
-            await supabase.from("resources").insert(
-              INITIAL_RESOURCES.map(r => ({
-                id: r.id,
-                name: r.name,
-                email: r.email,
-                phone: r.phone,
-                role: r.role,
-                dept: r.dept,
-                manager: r.manager,
-                location: r.location,
-                employment_type: r.employmentType,
-                cost_rate: r.costRate,
-                billing_rate: r.billingRate,
-                currency: r.currency,
-                joining_date: r.joiningDate,
-                experience_years: r.experienceYears,
-                skills: r.skills,
-                status: r.status,
-                utilization_rate: r.util,
-                availability_hrs_wk: r.availabilityHrsWk,
-                allocations: r.allocations,
-                timesheets: r.timesheets
-              }))
-            );
-          }
-        } else {
-          const mapped: Resource[] = data.map(r => ({
-            id: r.id,
-            name: r.name,
-            email: r.email,
-            phone: r.phone,
-            role: r.role,
-            dept: r.dept,
-            manager: r.manager,
-            location: r.location,
-            employmentType: r.employment_type || "Full Time",
-            costRate: Number(r.cost_rate),
-            billingRate: Number(r.billing_rate),
-            currency: r.currency || "USD",
-            joiningDate: r.joining_date,
-            experienceYears: Number(r.experience_years),
-            skills: typeof r.skills === "string" ? JSON.parse(r.skills) : (r.skills || []),
-            status: r.status,
-            util: Number(r.utilization_rate),
-            availabilityHrsWk: Number(r.availability_hrs_wk || 40),
-            allocations: typeof r.allocations === "string" ? JSON.parse(r.allocations) : (r.allocations || []),
-            timesheets: typeof r.timesheets === "string" ? JSON.parse(r.timesheets) : (r.timesheets || [])
-          }));
-          setResources(mapped);
-        }
-      } catch (err) {
-        console.error("Failed to load resources from Supabase:", err);
-        const saved = localStorage.getItem("nexus_resources_v2");
-        if (saved) {
-          setResources(JSON.parse(saved));
-        } else {
-          setResources(INITIAL_RESOURCES);
-        }
-      }
+    if (dbResources && dbResources.length > 0) {
+      setResources(dbResources);
+    } else {
+      const saved = localStorage.getItem("nexus_resources_v2");
+      setResources(saved ? JSON.parse(saved) : INITIAL_RESOURCES);
     }
-    loadResources();
-  }, []);
+  }, [dbResources]);
 
   const saveState = async (updated: Resource[]) => {
     setResources(updated);
     localStorage.setItem("nexus_resources_v2", JSON.stringify(updated));
 
-    try {
+    const syncPromise = (async () => {
       const rows = updated.map(r => ({
         id: r.id,
         name: r.name,
@@ -460,10 +777,19 @@ export default function ResourceModule() {
         timesheets: r.timesheets
       }));
 
-      await supabase.from("resources").upsert(rows);
-    } catch (err) {
-      console.error("Failed to upsert resources in Supabase:", err);
-    }
+      const { error } = await supabase.from("resources").upsert(rows);
+      if (error) {
+        throw error;
+      }
+      await syncRelatedTables(updated);
+      await refreshData();
+    })();
+
+    toast.promise(syncPromise, {
+      loading: "Saving resource changes...",
+      success: "Resources saved and synchronized!",
+      error: (err) => `Database sync failed: ${err.message || String(err)}`
+    });
   };
 
   // Status Styling
@@ -538,9 +864,11 @@ export default function ResourceModule() {
     const allocationsList: Allocation[] = [];
     let initialUtil = 0;
     if (empProjectAssignment) {
+      const targetProj = projects.find(p => p.name === empProjectAssignment);
+      const projId = targetProj ? targetProj.id : `PRJ-${Math.floor(1000 + Math.random() * 9000)}`;
       allocationsList.push({
         id: `AL-${Date.now()}`,
-        projectId: `PRJ-${Math.floor(1000 + Math.random() * 9000)}`,
+        projectId: projId,
         projectName: empProjectAssignment,
         role: "Resource",
         allocationPercent: 100,
@@ -577,6 +905,16 @@ export default function ResourceModule() {
 
     const updated = [...resources, newResource];
     saveState(updated);
+    
+    if (empProjectAssignment) {
+      notifyITAdminOfAllocation(
+        newResource.name,
+        empProjectAssignment,
+        user?.fullName || empManager || "System Admin",
+        newResource.role
+      );
+    }
+
     setIsAddModalOpen(false);
     toast.success(`Resource ${newResource.name} created successfully!`);
 
@@ -618,9 +956,12 @@ export default function ResourceModule() {
           toast.warning(`Warning: ${res.name} will be overallocated (${currentAllocSum + nextAllocPercent}%)!`);
         }
 
+        const targetProj = projects.find(p => p.name === allocProjectName);
+        const projId = targetProj ? targetProj.id : `PRJ-${Math.floor(1000 + Math.random() * 9000)}`;
+
         const newAlloc: Allocation = {
           id: `AL-${Date.now()}`,
-          projectId: `PRJ-${Math.floor(1000 + Math.random() * 9000)}`,
+          projectId: projId,
           projectName: allocProjectName,
           role: allocRole,
           allocationPercent: nextAllocPercent,
@@ -690,9 +1031,29 @@ export default function ResourceModule() {
 
   // Approve Timesheet Entry
   const handleTimesheetStatusChange = (resourceId: string, entryId: string, nextStatus: TimesheetEntry['status']) => {
+    const resObj = resources.find(r => r.id === resourceId);
+    const entryObj = resObj?.timesheets?.find(ts => ts.id === entryId);
+
+    if (resObj && entryObj) {
+      const costRateVal = resObj.costRate || 80;
+      const amount = Math.round(entryObj.hours * costRateVal);
+      const targetProj = projects.find(p => p.name === entryObj.projectName);
+
+      if (targetProj) {
+        if (nextStatus === "Approved" && entryObj.status !== "Approved") {
+          const newSpent = (targetProj.spent || 0) + amount;
+          updateProjectBudget(targetProj.id, targetProj.budget, newSpent);
+          toast.success(`Deducted $${amount.toLocaleString()} from "${targetProj.name}" budget pool (Added to spent).`);
+        } else if (entryObj.status === "Approved" && nextStatus !== "Approved") {
+          const newSpent = Math.max(0, (targetProj.spent || 0) - amount);
+          updateProjectBudget(targetProj.id, targetProj.budget, newSpent);
+          toast.success(`Reverted $${amount.toLocaleString()} back to "${targetProj.name}" budget pool (Removed from spent).`);
+        }
+      }
+    }
+
     const updated = resources.map(res => {
       if (res.id === resourceId) {
-        const entry = res.timesheets.find(ts => ts.id === entryId);
         const updatedEntries = res.timesheets.map(ts => {
           if (ts.id === entryId) {
             return { ...ts, status: nextStatus };
@@ -715,7 +1076,6 @@ export default function ResourceModule() {
         return {
           ...res,
           timesheets: updatedEntries,
-          // Update utilization dynamically if timesheets are approved
           util: newUtil > 0 ? newUtil : res.util
         };
       }
@@ -796,6 +1156,10 @@ export default function ResourceModule() {
     if (sortBy === "experience") return b.experienceYears - a.experienceYears;
     return a.name.localeCompare(b.name);
   });
+  const displayedDirectory = React.useMemo(() => {
+    const startIndex = (currentPageDirectory - 1) * 5;
+    return filteredDirectory.slice(startIndex, startIndex + 5);
+  }, [filteredDirectory, currentPageDirectory]);
 
   // Calculate high level KPIs
   const totalCapacity = resources.length * 40; // 40h standard
@@ -832,15 +1196,17 @@ export default function ResourceModule() {
           >
             <Download className="size-4" />Export CSV
           </button>
-          <button 
-            onClick={() => {
-              setIsAddModalOpen(true);
-              setAddFormTab("basic");
-            }}
-            className="h-10 px-4 rounded-xl bg-gradient-to-r from-primary to-accent text-white text-sm font-medium shadow-copper inline-flex items-center gap-2 hover:opacity-95 transition cursor-pointer"
-          >
-            <UserPlus className="size-4" />Add Resource
-          </button>
+          {canAddResource && (
+            <button 
+              onClick={() => {
+                setIsAddModalOpen(true);
+                setAddFormTab("basic");
+              }}
+              className="h-10 px-4 rounded-xl bg-gradient-to-r from-primary to-accent text-white text-sm font-medium shadow-copper inline-flex items-center gap-2 hover:opacity-95 transition cursor-pointer"
+            >
+              <UserPlus className="size-4" />Add Resource
+            </button>
+          )}
         </div>
       </div>
 
@@ -848,11 +1214,8 @@ export default function ResourceModule() {
       <div className="flex gap-1 border-b border-border overflow-x-auto pb-px">
         {[
           { id: "directory", label: "Directory & Bench" },
-          { id: "matrix", label: "Skills Matrix" },
-          { id: "planner", label: "Planner & Allocations" },
           { id: "timesheets", label: "Timesheets Approval" },
-          { id: "billing", label: "Billing & Revenue" },
-          { id: "analytics", label: "Analytics Reports" }
+          { id: "billing", label: "Billing & Revenue" }
         ].map((tab) => (
           <button
             key={tab.id}
@@ -888,7 +1251,7 @@ export default function ResourceModule() {
             ))}
           </div>
 
-          <div className="grid lg:grid-cols-3 gap-6">
+          <div className="grid lg:grid-cols-3 gap-6 items-start">
             {/* Directory List Column */}
             <div className="lg:col-span-2 bg-card border border-border rounded-2xl shadow-card overflow-hidden">
               {/* Directory Filter Bar */}
@@ -951,7 +1314,7 @@ export default function ResourceModule() {
                 <table className="w-full text-xs">
                   <thead className="bg-secondary/40 text-[10px] uppercase tracking-wider text-muted-foreground">
                     <tr className="border-b border-border">
-                      <th className="text-left font-medium px-5 py-3">Person</th>
+                      <th className="text-left font-medium px-5 py-3">Resource</th>
                       <th className="text-left font-medium px-3 py-3">ID / Dept</th>
                       <th className="text-left font-medium px-3 py-3">Skills</th>
                       <th className="text-left font-medium px-3 py-3">Utilization</th>
@@ -959,7 +1322,7 @@ export default function ResourceModule() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredDirectory.map((res) => (
+                    {displayedDirectory.map((res) => (
                       <tr 
                         key={res.id}
                         onClick={() => {
@@ -1009,64 +1372,131 @@ export default function ResourceModule() {
                   </tbody>
                 </table>
               </div>
+              {/* Pagination Controls */}
+              <div className="p-3 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground select-none bg-secondary/5">
+                <div>
+                  Showing{" "}
+                  <span className="font-semibold text-foreground">
+                    {filteredDirectory.length === 0 ? 0 : (currentPageDirectory - 1) * 5 + 1}
+                  </span>{" "}
+                  to{" "}
+                  <span className="font-semibold text-foreground">
+                    {Math.min(currentPageDirectory * 5, filteredDirectory.length)}
+                  </span>{" "}
+                  of{" "}
+                  <span className="font-semibold text-foreground">{filteredDirectory.length}</span>{" "}
+                  resources
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={currentPageDirectory === 1}
+                    onClick={() => setCurrentPageDirectory(prev => Math.max(1, prev - 1))}
+                    className="h-8 px-3 rounded-xl border border-border bg-card hover:bg-secondary disabled:opacity-40 disabled:hover:bg-card font-medium transition cursor-pointer flex items-center gap-1 select-none text-[11px]"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentPageDirectory >= Math.max(1, Math.ceil(filteredDirectory.length / 5))}
+                    onClick={() => setCurrentPageDirectory(prev => Math.min(Math.max(1, Math.ceil(filteredDirectory.length / 5)), prev + 1))}
+                    className="h-8 px-3 rounded-xl border border-border bg-card hover:bg-secondary disabled:opacity-40 disabled:hover:bg-card font-medium transition cursor-pointer flex items-center gap-1 select-none text-[11px]"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Bench Management Dashboard */}
-            <div className="space-y-4">
-              <div className="bg-card border border-border rounded-2xl p-5 shadow-card space-y-4">
-                <div className="flex items-center justify-between border-b border-border/60 pb-3">
-                  <div>
-                    <h3 className="font-semibold text-sm">Bench Management</h3>
-                    <p className="text-[10px] text-muted-foreground">Unallocated workforce mitigation</p>
-                  </div>
-                  <div className="px-2 py-0.5 bg-primary/10 text-primary text-[10px] rounded font-bold uppercase">
-                    Cost: ${resources.filter(r => r.status === "Bench").reduce((sum, r) => sum + r.costRate * 160, 0).toLocaleString()}/mo
-                  </div>
+            <div className="bg-card border border-border rounded-2xl shadow-card overflow-hidden">
+              <div className="px-5 py-4 border-b border-border bg-secondary/10 flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-sm">Bench Management</h3>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Unallocated workforce mitigation</p>
                 </div>
+                <div className="px-2 py-0.5 bg-primary/10 text-primary text-[10px] rounded font-bold uppercase">
+                  Cost: ${resources.filter(r => r.status === "Bench").reduce((sum, r) => sum + r.costRate * 160, 0).toLocaleString()}/mo
+                </div>
+              </div>
 
-                <div className="space-y-3">
-                  {resources.filter(r => r.status === "Bench" || r.status === "Available").map((res) => (
-                    <div key={res.id} className="p-3 bg-secondary/20 border border-border/80 rounded-xl space-y-2 text-xs">
-                      <div className="flex items-center justify-between">
-                        <div className="font-semibold">{res.name}</div>
-                        <span className="text-[9px] text-muted-foreground">Rate: ${res.costRate}/hr</span>
-                      </div>
-                      <div className="text-[10px] text-muted-foreground truncate">{res.role} · {res.dept}</div>
-                      
-                      <div className="flex gap-1.5 flex-wrap pt-1">
-                        {res.skills.map(s => (
-                          <span key={s.name} className="px-1 py-0.2 bg-secondary border border-border text-[9px] rounded">
-                            {s.name} ({s.level})
-                          </span>
-                        ))}
-                      </div>
+              <div className="p-5 space-y-3 bg-card">
+                {benchResources.map((res) => (
+                  <div key={res.id} className="p-3 bg-secondary/20 border border-border/80 rounded-xl space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold">{res.name}</div>
+                      <span className="text-[9px] text-muted-foreground">Rate: ${res.costRate}/hr</span>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground truncate">{res.role} · {res.dept}</div>
+                    
+                    <div className="flex gap-1.5 flex-wrap pt-1">
+                      {res.skills.map(s => (
+                        <span key={s.name} className="px-1 py-0.2 bg-secondary border border-border text-[9px] rounded">
+                          {s.name} ({s.level})
+                        </span>
+                      ))}
+                    </div>
 
-                      <div className="flex justify-end gap-2 pt-2 border-t border-border/40 mt-1">
-                        <button 
-                          onClick={() => {
-                            setAllocResourceEmail(res.email);
-                            setIsAllocationModalOpen(true);
-                          }}
-                          className="px-2 py-1 rounded bg-primary text-white text-[10px] font-medium shadow-copper cursor-pointer"
-                        >
-                          Allocate
-                        </button>
-                        <button 
-                          onClick={() => {
-                            toast.info(`Upskilling request sent for ${res.name}.`);
-                          }}
-                          className="px-2 py-1 rounded border border-border hover:bg-secondary text-[10px] font-medium cursor-pointer"
-                        >
-                          Upskill
-                        </button>
-                      </div>
+                    <div className="flex justify-end gap-2 pt-2 border-t border-border/40 mt-1">
+                      <button 
+                        onClick={() => {
+                          setAllocResourceEmail(res.email);
+                          setIsAllocationModalOpen(true);
+                        }}
+                        className="px-2 py-1 rounded bg-primary text-white text-[10px] font-medium shadow-copper cursor-pointer"
+                      >
+                        Allocate
+                      </button>
+                      <button 
+                        onClick={() => {
+                          toast.info(`Upskilling request sent for ${res.name}.`);
+                        }}
+                        className="px-2 py-1 rounded border border-border hover:bg-secondary text-[10px] font-medium cursor-pointer"
+                      >
+                        Upskill
+                      </button>
                     </div>
-                  ))}
-                  {resources.filter(r => r.status === "Bench" || r.status === "Available").length === 0 && (
-                    <div className="text-center py-6 italic text-muted-foreground text-xs">
-                      No resources currently on the bench.
-                    </div>
-                  )}
+                  </div>
+                ))}
+                {benchResources.length === 0 && (
+                  <div className="text-center py-6 italic text-muted-foreground text-xs">
+                    No resources currently on the bench.
+                  </div>
+                )}
+              </div>
+
+              {/* Pagination Controls */}
+              <div className="p-3 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground select-none bg-secondary/5">
+                <div>
+                  Showing{" "}
+                  <span className="font-semibold text-foreground">
+                    {allBenchResources.length === 0 ? 0 : (currentPageBench - 1) * 5 + 1}
+                  </span>{" "}
+                  to{" "}
+                  <span className="font-semibold text-foreground">
+                    {Math.min(currentPageBench * 5, allBenchResources.length)}
+                  </span>{" "}
+                  of{" "}
+                  <span className="font-semibold text-foreground">{allBenchResources.length}</span>{" "}
+                  items
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={currentPageBench === 1}
+                    onClick={() => setCurrentPageBench(prev => Math.max(1, prev - 1))}
+                    className="h-8 px-3 rounded-xl border border-border bg-card hover:bg-secondary disabled:opacity-40 disabled:hover:bg-card font-medium transition cursor-pointer flex items-center gap-1 select-none text-[11px]"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentPageBench >= Math.max(1, Math.ceil(allBenchResources.length / 5))}
+                    onClick={() => setCurrentPageBench(prev => Math.min(Math.max(1, Math.ceil(allBenchResources.length / 5)), prev + 1))}
+                    className="h-8 px-3 rounded-xl border border-border bg-card hover:bg-secondary disabled:opacity-40 disabled:hover:bg-card font-medium transition cursor-pointer flex items-center gap-1 select-none text-[11px]"
+                  >
+                    Next
+                  </button>
                 </div>
               </div>
             </div>
@@ -1077,7 +1507,7 @@ export default function ResourceModule() {
       {/* ========================================================
           TAB 2: SKILLS MATRIX
           ======================================================== */}
-      {activeTab === "matrix" && (
+      {(activeTab as any) === "matrix" && (
         <div className="space-y-6">
           <div className="grid md:grid-cols-3 gap-6">
             {/* Matrix Sheet */}
@@ -1224,7 +1654,7 @@ export default function ResourceModule() {
       {/* ========================================================
           TAB 3: PLANNER & ALLOCATIONS
           ======================================================== */}
-      {activeTab === "planner" && (
+      {(activeTab as any) === "planner" && (
         <div className="space-y-6">
           {/* Capacity and Allocations summary */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1373,11 +1803,11 @@ export default function ResourceModule() {
                   <label className="font-medium text-muted-foreground">Select Resource</label>
                   <select 
                     value={timesheetResourceEmail}
-                    onChange={(e) => setAllocResourceEmail(e.target.value)}
+                    onChange={(e) => setTimesheetResourceEmail(e.target.value)}
                     className="w-full h-9 px-2 rounded-xl bg-secondary border border-border"
                   >
-                    <option value="">Select Employee...</option>
-                    {resources.map(r => (
+                    <option value="">Select Resource...</option>
+                    {resources.filter(r => !isHumanResource(r)).map(r => (
                       <option key={r.id} value={r.email}>{r.name} ({r.role})</option>
                     ))}
                   </select>
@@ -1390,10 +1820,9 @@ export default function ResourceModule() {
                     onChange={(e) => setTimesheetProject(e.target.value)}
                     className="w-full h-9 px-2 rounded-xl bg-secondary border border-border"
                   >
-                    <option value="Atlas Banking Platform">Atlas Banking Platform</option>
-                    <option value="Helix CRM Migration">Helix CRM Migration</option>
-                    <option value="Nimbus Data Lake">Nimbus Data Lake</option>
-                    <option value="Mosaic Mobile Suite">Mosaic Mobile Suite</option>
+                    {filteredTimesheetProjects.map(p => (
+                      <option key={p.id} value={p.name}>{p.name}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -1578,45 +2007,120 @@ export default function ResourceModule() {
             </div>
           </div>
 
-          {/* Revenue Contribution per Resource list */}
-          <div className="bg-card border border-border rounded-2xl shadow-card overflow-hidden">
-            <div className="px-5 py-4 border-b border-border bg-secondary/10 flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold text-sm">Revenue Contribution Matrix</h3>
-                <p className="text-[10px] text-muted-foreground">Financial breakdown by resource and project</p>
-              </div>
+          {/* Revenue Contribution per Project Collapsible Folders */}
+          <div className="space-y-4">
+            <div className="flex flex-col">
+              <h3 className="font-semibold text-sm">Project-Wise Revenue Matrix</h3>
+              <p className="text-[10px] text-muted-foreground">Detailed financial and utilization breakdown grouped by project</p>
             </div>
 
-            <table className="w-full text-xs">
-              <thead className="bg-secondary/40 text-[10px] uppercase tracking-wider text-muted-foreground">
-                <tr className="border-b border-border">
-                  <th className="text-left font-medium px-5 py-3">Resource Name</th>
-                  <th className="text-center font-medium px-3 py-3">Billable Hours</th>
-                  <th className="text-center font-medium px-3 py-3">Billing Rate</th>
-                  <th className="text-center font-medium px-3 py-3">Cost Rate</th>
-                  <th className="text-right font-medium px-5 py-3">Total Billings Generated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {resources.map(res => {
-                  const billableHours = res.timesheets.filter(ts => ts.status === "Approved" && ts.isBillable).reduce((h, ts) => h + ts.hours, 0);
-                  const revenue = billableHours * res.billingRate;
-                  
-                  return (
-                    <tr key={res.id} className="border-b border-border/50 hover:bg-secondary/20 transition">
-                      <td className="px-5 py-3">
-                        <div className="font-semibold">{res.name}</div>
-                        <div className="text-[10px] text-muted-foreground">{res.role}</div>
-                      </td>
-                      <td className="text-center font-medium tabular-nums">{billableHours} hrs</td>
-                      <td className="text-center font-medium tabular-nums">${res.billingRate}/hr</td>
-                      <td className="text-center font-medium tabular-nums">${res.costRate}/hr</td>
-                      <td className="text-right px-5 font-semibold text-emerald-600">${revenue.toLocaleString()}</td>
-                    </tr>
+            <div className="space-y-3">
+              {projects.map(p => {
+                // For this project, gather all resources and their timesheets on this project
+                const contribs = resources.map(res => {
+                  const projTimesheets = res.timesheets.filter(ts => 
+                    ts.status === "Approved" && 
+                    ts.projectName === p.name
                   );
-                })}
-              </tbody>
-            </table>
+                  const billableHours = projTimesheets.filter(ts => ts.isBillable).reduce((sum, ts) => sum + ts.hours, 0);
+                  const totalHours = projTimesheets.reduce((sum, ts) => sum + ts.hours, 0);
+                  const revenue = billableHours * res.billingRate;
+                  const cost = totalHours * res.costRate;
+                  
+                  return {
+                    resource: res,
+                    billableHours,
+                    totalHours,
+                    revenue,
+                    cost
+                  };
+                }).filter(c => c.totalHours > 0); // only keep resources with logged hours
+
+                const totalBillableHours = contribs.reduce((sum, c) => sum + c.billableHours, 0);
+                const totalRevenue = contribs.reduce((sum, c) => sum + c.revenue, 0);
+                const totalCost = contribs.reduce((sum, c) => sum + c.cost, 0);
+                const isExpanded = !!expandedProjects[p.id];
+
+                return (
+                  <div key={p.id} className="border border-border rounded-xl bg-card overflow-hidden shadow-sm transition-all duration-200">
+                    {/* Folder Header */}
+                    <div 
+                      onClick={() => setExpandedProjects(prev => ({ ...prev, [p.id]: !isExpanded }))}
+                      className="px-5 py-4 flex items-center justify-between cursor-pointer hover:bg-secondary/40 transition select-none bg-secondary/10"
+                    >
+                      <div className="flex items-center gap-3">
+                        {isExpanded ? (
+                          <FolderOpen className="size-5 text-primary" />
+                        ) : (
+                          <Folder className="size-5 text-muted-foreground" />
+                        )}
+                        <div>
+                          <div className="font-semibold text-sm text-foreground">{p.name}</div>
+                          <div className="text-[10px] text-muted-foreground">Code: {p.code} · Manager: {p.projectManager}</div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-6">
+                        <div className="text-right">
+                          <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Project Billings</div>
+                          <div className="text-sm font-semibold text-emerald-600">${totalRevenue.toLocaleString()}</div>
+                        </div>
+                        <div className="text-right hidden sm:block">
+                          <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Resource Costs</div>
+                          <div className="text-sm font-semibold text-stone-700 dark:text-stone-300">${totalCost.toLocaleString()}</div>
+                        </div>
+                        <div className="text-right hidden md:block">
+                          <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Hours Logged</div>
+                          <div className="text-sm font-semibold text-foreground">{totalBillableHours} hrs</div>
+                        </div>
+                        {isExpanded ? (
+                          <ChevronDown className="size-4 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="size-4 text-muted-foreground" />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Folder Contents */}
+                    {isExpanded && (
+                      <div className="border-t border-border bg-card">
+                        {contribs.length === 0 ? (
+                          <div className="p-5 text-center text-xs text-muted-foreground italic">
+                            No billing records found for this project.
+                          </div>
+                        ) : (
+                          <table className="w-full text-xs">
+                            <thead className="bg-secondary/20 text-[10px] uppercase tracking-wider text-muted-foreground">
+                              <tr className="border-b border-border">
+                                <th className="text-left font-medium px-5 py-2">Resource Name</th>
+                                <th className="text-center font-medium px-3 py-2">Billable Hours</th>
+                                <th className="text-center font-medium px-3 py-2">Billing Rate</th>
+                                <th className="text-center font-medium px-3 py-2">Cost Rate</th>
+                                <th className="text-right font-medium px-5 py-2">Billings Generated</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {contribs.map(c => (
+                                <tr key={c.resource.id} className="border-b border-border/50 last:border-0 hover:bg-secondary/10 transition">
+                                  <td className="px-5 py-2.5">
+                                    <div className="font-semibold">{c.resource.name}</div>
+                                    <div className="text-[10px] text-muted-foreground">{c.resource.role}</div>
+                                  </td>
+                                  <td className="text-center font-medium tabular-nums">{c.billableHours} hrs</td>
+                                  <td className="text-center font-medium tabular-nums">${c.resource.billingRate}/hr</td>
+                                  <td className="text-center font-medium tabular-nums">${c.resource.costRate}/hr</td>
+                                  <td className="text-right px-5 font-semibold text-emerald-600">${c.revenue.toLocaleString()}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -1624,7 +2128,7 @@ export default function ResourceModule() {
       {/* ========================================================
           TAB 6: ANALYTICS REPORTS
           ======================================================== */}
-      {activeTab === "analytics" && (
+      {(activeTab as any) === "analytics" && (
         <div className="space-y-6">
           <div className="grid md:grid-cols-2 gap-6">
             {/* Chart 1: Utilization Distribution */}
@@ -1689,18 +2193,18 @@ export default function ResourceModule() {
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             {/* Backdrop */}
-            <div onClick={() => setIsAddModalOpen(false)} className="absolute inset-0 bg-black/60 backdrop-blur-xs" />
+            <div onClick={() => setIsAddModalOpen(false)} className="absolute inset-0 bg-black/85 backdrop-blur-md" />
 
             {/* Form Container */}
-            <div className="relative bg-[#111111] border border-stone-800 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-stone-100 flex flex-col">
+            <div className="relative bg-[#0A0A0A] border border-white/5 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-stone-100 flex flex-col">
               {/* Modal Header */}
-              <div className="px-6 py-4 border-b border-stone-850 flex items-start justify-between">
+              <div className="px-6 py-3.5 border-b border-white/5 bg-[#0D0D0D] flex items-center justify-between">
                 <div className="flex gap-3 items-center">
-                  <div className="size-9 rounded-xl bg-[#C67C4E]/10 border border-[#C67C4E]/25 flex items-center justify-center shrink-0">
-                    <UserPlus className="size-4.5 text-[#C67C4E]" />
+                  <div className="size-9 rounded-xl bg-[#C8844A]/10 border border-[#C8844A]/20 flex items-center justify-center shrink-0">
+                    <UserPlus className="size-4.5 text-[#C8844A]" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-stone-100 text-sm">Add New Resource Profile</h3>
+                    <h3 className="font-semibold text-stone-100 text-[15px] tracking-tight">Add New Resource Profile</h3>
                     <p className="text-[10px] text-stone-500 mt-0.5">Create a new resource profile to manage and track your organization resources.</p>
                   </div>
                 </div>
@@ -1714,292 +2218,280 @@ export default function ResourceModule() {
               </div>
 
               {/* Steps Progress */}
-              <div className="flex items-center justify-center gap-6 py-3.5 border-b border-stone-850 bg-[#141414] text-[11px] font-semibold text-stone-400">
+              <div className="flex items-center justify-center gap-6 py-2.5 border-b border-white/5 bg-[#0E0E0E] text-[11px] font-semibold text-stone-400">
                 {/* Step 1: Basic Details */}
-                <div className="flex items-center gap-2">
+                <div 
+                  onClick={() => setAddFormTab("basic")}
+                  className="flex items-center gap-2 cursor-pointer hover:text-stone-250 transition"
+                >
                   {addFormTab === "basic" ? (
-                    <span className="size-5 rounded-full bg-[#C67C4E] text-white flex items-center justify-center text-[10px]">1</span>
+                    <span className="size-5 rounded-full bg-[#C8844A] text-white flex items-center justify-center text-[10px]">1</span>
                   ) : (
-                    <span className="size-5 rounded-full bg-[#C67C4E]/25 text-[#C67C4E] border border-[#C67C4E]/40 flex items-center justify-center text-[10px]">✓</span>
+                    <span className="size-5 rounded-full bg-[#C8844A]/25 text-[#C8844A] border border-[#C8844A]/40 flex items-center justify-center text-[10px]">✓</span>
                   )}
-                  <span className={addFormTab === "basic" ? "text-stone-100" : "text-stone-450"}>Basic Details</span>
+                  <span className={addFormTab === "basic" ? "text-[#C8844A]" : "text-stone-450"}>Basic Details</span>
                 </div>
                 
-                <div className={`h-0.5 w-16 ${addFormTab !== "basic" ? "bg-[#C67C4E]" : "bg-stone-800"}`} />
+                <div className={`h-0.5 w-16 ${addFormTab !== "basic" ? "bg-[#C8844A]" : "bg-white/5"}`} />
 
                 {/* Step 2: Cost & Hours */}
-                <div className="flex items-center gap-2">
+                <div 
+                  onClick={() => setAddFormTab("cost")}
+                  className="flex items-center gap-2 cursor-pointer hover:text-stone-250 transition"
+                >
                   {addFormTab === "cost" ? (
-                    <span className="size-5 rounded-full bg-[#C67C4E] text-white flex items-center justify-center text-[10px]">2</span>
-                  ) : addFormTab === "skills" ? (
-                    <span className="size-5 rounded-full bg-[#C67C4E]/25 text-[#C67C4E] border border-[#C67C4E]/40 flex items-center justify-center text-[10px]">✓</span>
+                    <span className="size-5 rounded-full bg-[#C8844A] text-white flex items-center justify-center text-[10px]">2</span>
+                  ) : (addFormTab === "skills" ? (
+                    <span className="size-5 rounded-full bg-[#C8844A]/25 text-[#C8844A] border border-[#C8844A]/40 flex items-center justify-center text-[10px]">✓</span>
                   ) : (
-                    <span className="size-5 rounded-full border border-stone-800 text-stone-500 flex items-center justify-center text-[10px]">2</span>
-                  )}
-                  <span className={addFormTab === "cost" ? "text-stone-100" : "text-stone-450"}>Cost & Hours</span>
+                    <span className="size-5 rounded-full border border-white/5 text-stone-500 flex items-center justify-center text-[10px]">2</span>
+                  ))}
+                  <span className={addFormTab === "cost" ? "text-[#C8844A]" : "text-stone-450"}>Cost & Hours</span>
                 </div>
 
-                <div className={`h-0.5 w-16 ${addFormTab === "skills" ? "bg-[#C67C4E]" : "bg-stone-800"}`} />
+                <div className={`h-0.5 w-16 ${addFormTab === "skills" ? "bg-[#C8844A]" : "bg-white/5"}`} />
 
                 {/* Step 3: Skills Profile */}
-                <div className="flex items-center gap-2">
+                <div 
+                  onClick={() => setAddFormTab("skills")}
+                  className="flex items-center gap-2 cursor-pointer hover:text-stone-250 transition"
+                >
                   {addFormTab === "skills" ? (
-                    <span className="size-5 rounded-full bg-[#C67C4E] text-white flex items-center justify-center text-[10px]">3</span>
+                    <span className="size-5 rounded-full bg-[#C8844A] text-white flex items-center justify-center text-[10px]">3</span>
                   ) : (
-                    <span className="size-5 rounded-full border border-stone-800 text-stone-500 flex items-center justify-center text-[10px]">3</span>
+                    <span className="size-5 rounded-full border border-white/5 text-stone-500 flex items-center justify-center text-[10px]">3</span>
                   )}
-                  <span className={addFormTab === "skills" ? "text-stone-100" : "text-stone-450"}>Skills Profile</span>
+                  <span className={addFormTab === "skills" ? "text-[#C8844A]" : "text-stone-450"}>Skills Profile</span>
                 </div>
               </div>
 
               {/* Two Column Layout Container */}
-              <form onSubmit={handleSaveResource} className="flex flex-col md:flex-row h-[420px]">
+              <form onSubmit={handleSaveResource} className="flex flex-col md:flex-row h-[430px]">
                 {/* Left Column (Inputs) */}
-                <div className="w-full md:w-[62%] p-5 overflow-y-auto border-r border-stone-850 space-y-4 text-xs">
+                <div className="w-full md:w-[65%] p-5 overflow-y-auto border-r border-white/5 space-y-3.5 text-xs scrollbar-none" style={{ scrollbarWidth: "none" }}>
                   {addFormTab === "basic" && (
-                    <div className="space-y-3.5">
+                    <div className="space-y-3.5 animate-in fade-in duration-200">
                       {/* Resource Name & Verify with AI */}
                       <div className="space-y-1">
                         <label className="font-semibold text-stone-300">Resource Name *</label>
-                        <div className="flex gap-2">
-                          <div className="relative flex-1">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500">
-                              <Layers className="size-3.5" />
-                            </span>
-                            <input
-                              type="text"
-                              required
-                              placeholder="e.g. Azure Virtual Machine"
-                              value={empName}
-                              onChange={(e) => setEmpName(e.target.value)}
-                              className="w-full h-9 pl-9 pr-4 border border-stone-850 bg-stone-900 rounded-xl text-stone-100 placeholder:text-stone-500 focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                            />
-                          </div>
+                        <div className="relative flex items-center">
+                          <span className="absolute left-3.5 text-stone-500 pointer-events-none">
+                            <Cloud className="size-4" />
+                          </span>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. Azure Virtual Machine"
+                            value={empName}
+                            onChange={(e) => setEmpName(e.target.value)}
+                            className="w-full h-11 pl-10 pr-32 bg-stone-900/40 border border-white/5 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C8844A] focus:border-[#C8844A]/50 placeholder:text-stone-500 transition-all duration-200"
+                          />
                           <button
                             type="button"
                             onClick={handleVerifyWithAI}
                             disabled={isVerifying || !empName}
-                            className="h-9 px-3 rounded-xl border border-stone-800 bg-stone-900 hover:bg-stone-850 text-[11px] text-stone-300 font-semibold inline-flex items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            className="absolute right-1.5 h-8 px-3 rounded-lg bg-[#C8844A] hover:bg-[#D89A63] text-[10.5px] text-white font-semibold inline-flex items-center gap-1.5 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                           >
-                            <Sparkles className="size-3.5 text-[#C67C4E] animate-pulse" />
+                            <Sparkles className="size-3 text-white animate-pulse" />
                             Verify with AI
                           </button>
                         </div>
                         <span className="text-[10px] text-stone-500 block">Enter a unique and descriptive name for this resource.</span>
                       </div>
 
-                      {/* Resource Type & Department */}
+                      {/* Row 1: Resource Type & Department */}
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
                           <label className="font-semibold text-stone-300">Resource Type / Specification *</label>
-                          <select
+                          <DarkSelect
                             value={empDesignation}
-                            onChange={(e) => setEmpDesignation(e.target.value)}
-                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                          >
-                            <option value="Other Cloud Service">Other Cloud Service</option>
-                            <option value="AWS EC2 Instance">AWS EC2 Instance</option>
-                            <option value="AWS S3 Storage">AWS S3 Storage</option>
-                            <option value="AWS RDS Database">AWS RDS Database</option>
-                            <option value="GCP Compute VM">GCP Compute VM</option>
-                            <option value="Azure Virtual Machine">Azure Virtual Machine</option>
-                            <option value="OpenAI API Service">OpenAI API Service</option>
-                            <option value="Frontend Engineer">Frontend Engineer</option>
-                            <option value="Backend Engineer">Backend Engineer</option>
-                            <option value="Product Designer">Product Designer</option>
-                          </select>
+                            onValueChange={setEmpDesignation}
+                            placeholder="Select Type..."
+                            leftIcon={<Wrench className="size-4" />}
+                            options={DESIGNATION_OPTIONS}
+                          />
                         </div>
+
                         <div className="space-y-1">
                           <label className="font-semibold text-stone-300">Department / Team *</label>
-                          <select
+                          <DarkSelect
                             value={empDept}
-                            onChange={(e) => setEmpDept(e.target.value)}
-                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                          >
-                            <option value="Engineering">Engineering</option>
-                            <option value="Design">Design</option>
-                            <option value="Product">Product</option>
-                            <option value="Data">Data</option>
-                            <option value="QA">QA</option>
-                            <option value="DevOps">DevOps</option>
-                          </select>
+                            onValueChange={setEmpDept}
+                            placeholder="Select Department..."
+                            leftIcon={<Layers className="size-4" />}
+                            options={DEPT_OPTIONS}
+                          />
                         </div>
                       </div>
 
-                      {/* Manager / Owner & Status */}
+                      {/* Row 2: Manager & Status */}
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
                           <label className="font-semibold text-stone-300">Manager / Owner *</label>
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500">
-                              <User className="size-3.5" />
-                            </span>
-                            <input
-                              type="text"
-                              required
-                              placeholder="e.g. Yogesh V"
-                              value={empManager}
-                              onChange={(e) => setEmpManager(e.target.value)}
-                              className="w-full h-9 pl-9 pr-4 border border-stone-850 bg-stone-900 rounded-xl text-stone-100 placeholder:text-stone-500 focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                            />
-                          </div>
+                          <DarkSelect
+                            value={empManager}
+                            onValueChange={setEmpManager}
+                            placeholder="Select Manager..."
+                            leftIcon={<User className="size-4" />}
+                            options={MANAGER_OPTIONS}
+                          />
                         </div>
+
                         <div className="space-y-1">
                           <label className="font-semibold text-stone-300">Resource Status *</label>
-                          <select
+                          <DarkSelect
                             value={empStatus}
-                            onChange={(e) => setEmpStatus(e.target.value)}
-                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                          >
-                            <option value="Available">🟢 Active / Available</option>
-                            <option value="Allocated">🔵 Allocated</option>
-                            <option value="Partially Allocated">🟡 Partially Allocated</option>
-                            <option value="Bench">⚪ Bench</option>
-                            <option value="On Leave">🔴 On Leave</option>
-                            <option value="Inactive">⚫ Inactive</option>
-                          </select>
+                            onValueChange={setEmpStatus}
+                            placeholder="Select Status..."
+                            leftIcon={<CheckCircle className="size-4" />}
+                            options={STATUS_OPTIONS}
+                          />
                         </div>
                       </div>
 
                       {/* Project Assignment */}
                       <div className="space-y-1">
                         <label className="font-semibold text-stone-300">Project Assignment *</label>
-                        <select
+                        <DarkSelect
                           value={empProjectAssignment}
-                          onChange={(e) => setEmpProjectAssignment(e.target.value)}
-                          className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                        >
-                          <option value="UVANTHU">UVANTHU</option>
-                          <option value="Atlas Banking Platform">Atlas Banking Platform</option>
-                          <option value="Helix CRM Migration">Helix CRM Migration</option>
-                          <option value="Nimbus Data Lake">Nimbus Data Lake</option>
-                          <option value="Mosaic Mobile Suite">Mosaic Mobile Suite</option>
-                          <option value="Lumen Customer 360">Lumen Customer 360</option>
-                        </select>
+                          onValueChange={setEmpProjectAssignment}
+                          placeholder="Select Project..."
+                          leftIcon={<Briefcase className="size-4" />}
+                          options={PROJECT_OPTIONS}
+                        />
                         <span className="text-[10px] text-stone-500 block">Assign this resource to a project during provisioning.</span>
                       </div>
 
                       {/* Resource Description */}
                       <div className="space-y-1">
                         <label className="font-semibold text-stone-300">Resource Description</label>
-                        <textarea
-                          placeholder="Provide a brief description about this resource and its purpose."
-                          value={empDescription}
-                          onChange={(e) => setEmpDescription(e.target.value)}
-                          className="w-full h-16 p-3 border border-stone-850 bg-stone-900 rounded-xl text-stone-100 placeholder:text-stone-500 focus:outline-none focus:ring-1 focus:ring-[#C67C4E] resize-none"
-                        />
-                        <span className="text-[10px] text-stone-500 block">Provide a brief description about this resource and its purpose.</span>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-3 text-stone-500 pointer-events-none">
+                            <FileText className="size-4" />
+                          </span>
+                          <textarea
+                            placeholder="Provide a brief description about this resource and its purpose."
+                            value={empDescription}
+                            onChange={(e) => setEmpDescription(e.target.value)}
+                            className="w-full h-20 pl-10 pr-4 py-2 bg-stone-900/40 border border-white/5 text-stone-100 placeholder:text-stone-500 focus:outline-none focus:ring-1 focus:ring-[#C8844A] focus:border-[#C8844A]/50 resize-none transition-all duration-200"
+                          />
+                        </div>
                       </div>
                     </div>
                   )}
 
                   {addFormTab === "cost" && (
-                    <div className="space-y-4">
-                      {/* Cost Rate & Billing Rate */}
+                    <div className="space-y-4 animate-in fade-in duration-200">
+                      {/* Grid matching exact layout */}
                       <div className="grid grid-cols-2 gap-4">
+                        {/* Cost Rate & Currency */}
                         <div className="space-y-1">
                           <label className="font-semibold text-stone-300">Cost Rate ($ / hr) *</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={empCostRate}
-                            onChange={(e) => setEmpCostRate(e.target.value)}
-                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                          <div className="relative">
+                            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 font-semibold">$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={empCostRate}
+                              onChange={(e) => setEmpCostRate(e.target.value)}
+                              className="w-full h-11 pl-8 pr-3 bg-stone-900/40 border border-white/5 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C8844A] focus:border-[#C8844A]/50 placeholder:text-stone-500 transition-all duration-200"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Currency *</label>
+                          <DarkSelect
+                            value={empCurrency}
+                            onValueChange={setEmpCurrency}
+                            placeholder="Select Currency..."
+                            options={CURRENCY_OPTIONS}
+                          />
+                        </div>
+
+                        {/* Resource Category & Billing Rate */}
+                        <div className="space-y-1">
+                          <label className="font-semibold text-stone-300">Resource Category *</label>
+                          <DarkSelect
+                            value={empCategory}
+                            onValueChange={setEmpCategory}
+                            placeholder="Select Category..."
+                            leftIcon={<Server className="size-4" />}
+                            options={CATEGORY_OPTIONS}
                           />
                         </div>
                         <div className="space-y-1">
                           <label className="font-semibold text-stone-300">Billing Rate ($ / hr) *</label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            min="0"
-                            value={empBillingRate}
-                            onChange={(e) => setEmpBillingRate(e.target.value)}
-                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                          />
+                          <div className="relative">
+                            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 font-semibold">$</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              value={empBillingRate}
+                              onChange={(e) => setEmpBillingRate(e.target.value)}
+                              className="w-full h-11 pl-8 pr-10 bg-stone-900/40 border border-white/5 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C8844A] focus:border-[#C8844A]/50 placeholder:text-stone-500 transition-all duration-200"
+                            />
+                            <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none">
+                              <Tag className="size-4" />
+                            </span>
+                          </div>
                         </div>
-                      </div>
 
-                      {/* Currency & Availability */}
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                          <label className="font-semibold text-stone-300">Currency *</label>
-                          <select
-                            value={empCurrency}
-                            onChange={(e) => setEmpCurrency(e.target.value)}
-                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                          >
-                            <option value="USD">USD ($)</option>
-                            <option value="EUR">EUR (€)</option>
-                            <option value="GBP">GBP (£)</option>
-                          </select>
-                        </div>
+                        {/* Availability & Provisioning Date */}
                         <div className="space-y-1">
                           <label className="font-semibold text-stone-300">Availability (hrs / wk) *</label>
-                          <input
-                            type="number"
-                            min="1"
-                            max="168"
-                            value={empAvailability}
-                            onChange={(e) => setEmpAvailability(e.target.value)}
-                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Resource Category & Provisioning Date */}
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                          <label className="font-semibold text-stone-300">Resource Category *</label>
-                          <select
-                            value={empCategory}
-                            onChange={(e) => setEmpCategory(e.target.value)}
-                            className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                          >
-                            <option value="VM">VM</option>
-                            <option value="Storage">Storage</option>
-                            <option value="Database">Database</option>
-                            <option value="Cache">Cache</option>
-                            <option value="LLM">LLM</option>
-                            <option value="SaaS API">SaaS API</option>
-                            <option value="Human">Human</option>
-                          </select>
+                          <div className="relative">
+                            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none">
+                              <Clock className="size-4" />
+                            </span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="168"
+                              value={empAvailability}
+                              onChange={(e) => setEmpAvailability(e.target.value)}
+                              className="w-full h-11 pl-10 pr-3 bg-stone-900/40 border border-white/5 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C8844A] focus:border-[#C8844A]/50 placeholder:text-stone-500 transition-all duration-200"
+                            />
+                          </div>
                         </div>
                         <div className="space-y-1">
                           <label className="font-semibold text-stone-300">Provisioning Date *</label>
                           <div className="relative">
+                            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none">
+                              <Calendar className="size-4" />
+                            </span>
                             <input
                               type="date"
                               required
                               value={empJoinDate}
                               onChange={(e) => setEmpJoinDate(e.target.value)}
-                              className="w-full h-9 px-3 border border-stone-850 bg-stone-900 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                              className="w-full h-11 pl-10 pr-3 bg-stone-900/40 border border-white/5 text-stone-100 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#C8844A] focus:border-[#C8844A]/50 placeholder:text-stone-500 transition-all duration-200"
                             />
                           </div>
                         </div>
                       </div>
 
                       {/* Calculated Resource Economics */}
-                      <div className="pt-4 space-y-3">
+                      <div className="pt-3.5 space-y-2.5">
                         <div className="flex items-center gap-1.5 text-stone-300 font-semibold">
-                          <DollarSign className="size-4 text-[#C67C4E]" />
-                          <span>CALCULATED RESOURCE ECONOMICS</span>
-                          <span className="text-[10px] text-stone-500 font-normal ml-auto">Real-time Estimation</span>
+                          <DollarSign className="size-4 text-[#C8844A]" />
+                          <span className="text-[11px] tracking-wider uppercase font-bold text-stone-400">CALCULATED RESOURCE ECONOMICS</span>
+                          <span className="text-[9.5px] text-stone-500 font-normal ml-auto">Real-time Estimation</span>
                         </div>
                         
                         <div className="grid grid-cols-3 gap-3">
-                          <div className="bg-stone-950/40 border border-stone-850 p-3.5 rounded-xl space-y-1">
+                          <div className="bg-[#151515] border border-white/5 p-3 rounded-xl space-y-0.5">
                             <div className="text-[9px] uppercase font-semibold text-stone-500">Weekly Cost</div>
-                            <div className="text-sm font-bold text-[#C67C4E]">${weeklyCost.toFixed(2)}</div>
+                            <div className="text-base font-bold tracking-tight text-[#C8844A]">${weeklyCost.toFixed(2)}</div>
                           </div>
-                          <div className="bg-stone-950/40 border border-stone-850 p-3.5 rounded-xl space-y-1">
+                          <div className="bg-[#151515] border border-white/5 p-3 rounded-xl space-y-0.5">
                             <div className="text-[9px] uppercase font-semibold text-stone-500">Monthly Cost</div>
-                            <div className="text-sm font-bold text-stone-100">${monthlyCost.toFixed(2)}</div>
+                            <div className="text-base font-bold tracking-tight text-stone-100">${monthlyCost.toFixed(2)}</div>
                           </div>
-                          <div className="bg-stone-950/40 border border-stone-850 p-3.5 rounded-xl space-y-1">
-                            <div className="text-[9px] uppercase font-semibold text-stone-500">Weekly Revenue</div>
-                            <div className="text-sm font-bold text-emerald-500">${weeklyRevenue.toFixed(2)}</div>
+                          <div className="bg-[#151515] border border-white/5 p-3 rounded-xl space-y-0.5">
+                            <div className="text-[9px] uppercase font-semibold text-stone-500">Weekly Rev</div>
+                            <div className="text-base font-bold tracking-tight text-emerald-400">${weeklyRevenue.toFixed(2)}</div>
                           </div>
                         </div>
                       </div>
@@ -2007,55 +2499,47 @@ export default function ResourceModule() {
                   )}
 
                   {addFormTab === "skills" && (
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center">
+                    <div className="space-y-3.5 animate-in fade-in duration-200">
+                      <div className="flex justify-between items-center pb-1">
                         <span className="font-semibold text-stone-300">Skills Directory Mapping</span>
                         <button 
                           type="button" 
                           onClick={addSkillToForm}
-                          className="px-2.5 py-1.5 bg-stone-900 border border-stone-800 rounded-lg flex items-center gap-1 hover:bg-stone-850 text-stone-250 transition text-[11px] cursor-pointer"
+                          className="px-2.5 py-1.5 bg-[#1A1A1A] border border-white/5 rounded-lg flex items-center gap-1 hover:bg-[#252525] text-stone-250 transition text-[11px] cursor-pointer"
                         >
-                          <Plus className="size-3 text-[#C67C4E]" />Add Skill
+                          <Plus className="size-3 text-[#C8844A]" />Add Skill
                         </button>
                       </div>
 
-                      <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
+                      <div className="space-y-2.5 max-h-[270px] overflow-y-auto pr-1">
                         {formSkills.map((sk, idx) => (
-                          <div key={idx} className="p-3 bg-stone-950/40 border border-stone-850 rounded-xl grid grid-cols-3 gap-2 relative">
+                          <div key={idx} className="p-3.5 bg-stone-900/20 border border-white/5 rounded-xl grid grid-cols-3 gap-3 relative">
                             <div className="space-y-1 col-span-2">
                               <label className="text-[9px] uppercase font-bold text-stone-400">Skill Name</label>
-                              <select 
+                              <DarkSelect 
                                 value={sk.name}
-                                onChange={(e) => {
+                                onValueChange={(val) => {
                                   const newSk = [...formSkills];
-                                  newSk[idx].name = e.target.value;
+                                  newSk[idx].name = val;
                                   setFormSkills(newSk);
                                 }}
-                                className="w-full h-8 px-2 bg-stone-900 border border-stone-800 text-stone-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                              >
-                                {ALL_SKILLS.map(s => (
-                                  <option key={s} value={s}>{s}</option>
-                                ))}
-                              </select>
+                                size="sm"
+                                options={ALL_SKILLS.map(s => ({ value: s, label: s }))}
+                              />
                             </div>
 
                             <div className="space-y-1">
                               <label className="text-[9px] uppercase font-bold text-stone-400">Proficiency</label>
-                              <select 
+                              <DarkSelect 
                                 value={sk.level}
-                                onChange={(e) => {
+                                onValueChange={(val) => {
                                   const newSk = [...formSkills];
-                                  newSk[idx].level = e.target.value as any;
+                                  newSk[idx].level = val as any;
                                   setFormSkills(newSk);
                                 }}
-                                className="w-full h-8 px-2 bg-stone-900 border border-stone-800 text-stone-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
-                              >
-                                <option value="Beginner">Beginner</option>
-                                <option value="Intermediate">Intermediate</option>
-                                <option value="Advanced">Advanced</option>
-                                <option value="Expert">Expert</option>
-                                <option value="Architect">Architect</option>
-                              </select>
+                                size="sm"
+                                options={PROFICIENCY_OPTIONS}
+                              />
                             </div>
 
                             <div className="space-y-1 col-span-2">
@@ -2069,7 +2553,7 @@ export default function ResourceModule() {
                                   newSk[idx].certification = e.target.value;
                                   setFormSkills(newSk);
                                 }}
-                                className="w-full h-8 px-2 bg-stone-900 border border-stone-800 text-stone-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                                className="w-full h-9 px-3.5 bg-[#1A1A1A] border border-white/5 text-stone-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C8844A] focus:border-[#C8844A]/50 placeholder:text-stone-600"
                               />
                             </div>
 
@@ -2083,7 +2567,7 @@ export default function ResourceModule() {
                                   newSk[idx].yearsExp = Number(e.target.value) || 1;
                                   setFormSkills(newSk);
                                 }}
-                                className="w-full h-8 px-2 bg-stone-900 border border-stone-800 text-stone-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C67C4E]"
+                                className="w-full h-9 px-3.5 bg-[#1A1A1A] border border-white/5 text-stone-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#C8844A] focus:border-[#C8844A]/50"
                               />
                             </div>
 
@@ -2104,104 +2588,96 @@ export default function ResourceModule() {
                 </div>
 
                 {/* Right Column (Resource Preview) */}
-                <div className="w-full md:w-[38%] p-5 bg-[#141414] overflow-y-auto space-y-4 flex flex-col justify-start">
-                  <div className="flex items-center gap-1.5 text-stone-400 font-bold text-[9.5px] uppercase tracking-wider">
-                    <Eye className="size-3.5 text-stone-500" />
+                <div className="w-full md:w-[35%] p-5 bg-[#0C0C0C] overflow-y-auto space-y-4 flex flex-col justify-start">
+                  <div className="flex items-center gap-1.5 text-stone-500 font-bold text-[9.5px] uppercase tracking-wider">
+                    <Eye className="size-3.5" />
                     <span>Resource Preview</span>
                   </div>
 
                   {/* Preview Avatar card */}
-                  <div className="bg-stone-900 border border-stone-850 rounded-2xl p-4 flex flex-col items-center justify-center text-center space-y-2 relative overflow-hidden shadow-inner">
-                    <div className="size-14 rounded-2xl bg-stone-950 border border-stone-850 flex items-center justify-center relative shadow-sm">
-                      <svg className="size-7 text-[#C67C4E]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M17.5 19A3.5 3.5 0 0 0 21 15.5c0-2.79-2.54-4.5-5-4.5-.48 0-.96.06-1.4.17A5.5 5.5 0 0 0 6.5 10c-2.3 0-4.14 1.7-4.47 3.93A3.5 3.5 0 0 0 5.5 19" />
-                      </svg>
-                      <span className="absolute bottom-1 right-1 size-3.5 rounded bg-[#C67C4E] text-white flex items-center justify-center text-[7px] font-bold">
+                  <div className="bg-[#141414] border border-white/5 rounded-2xl p-4 flex flex-col items-center justify-center text-center space-y-2.5 relative overflow-hidden shadow-xl">
+                    <div className="size-14 rounded-2xl bg-[#1A1A1A] border border-white/5 flex items-center justify-center relative shadow-sm">
+                      <Cloud className="size-7 text-[#C8844A]" />
+                      <span className="absolute bottom-1 right-1 size-4 rounded bg-[#C8844A]/10 border border-[#C8844A]/30 text-[#C8844A] flex items-center justify-center text-[8px] font-bold">
                         📦
                       </span>
                     </div>
                     <div className="space-y-1">
-                      <h4 className="font-bold text-stone-100 text-[11px] truncate max-w-[190px]">{empName || "Resource Name"}</h4>
-                      <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[8.5px] font-semibold text-emerald-500">
-                        <span className="size-1 rounded-full bg-emerald-500 animate-pulse" />
+                      <h4 className="font-bold text-stone-100 text-[13px] tracking-tight truncate max-w-[190px]">{empName || "Resource Name"}</h4>
+                      <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[9px] font-semibold text-emerald-500">
+                        <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
                         <span>{empStatus || "Available"}</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Preview Table details */}
-                  <div className="space-y-2 text-[9.5px] pt-1 flex-1">
-                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
-                      <span className="text-stone-500 uppercase font-semibold">Department / Team</span>
-                      <span className="font-semibold text-stone-300">{empDept}</span>
+                  <div className="space-y-2.5 text-[10.5px] pt-1.5 flex-1">
+                    <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                      <span className="text-stone-500 font-medium">Department / Team</span>
+                      <span className="font-medium text-stone-300">{empDept}</span>
                     </div>
-                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
-                      <span className="text-stone-500 uppercase font-semibold">Manager / Owner</span>
-                      <span className="font-semibold text-stone-300">{empManager || "Yogesh V"}</span>
+                    <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                      <span className="text-stone-500 font-medium">Manager / Owner</span>
+                      <span className="font-medium text-stone-300">{empManager || "Yogesh V"}</span>
                     </div>
-                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
-                      <span className="text-stone-500 uppercase font-semibold">Type / Specification</span>
-                      <span className="font-semibold text-stone-300 truncate max-w-[120px]">{empDesignation || "Other Cloud Service"}</span>
+                    <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                      <span className="text-stone-500 font-medium">Type / Specification</span>
+                      <span className="font-medium text-stone-300 truncate max-w-[120px]">{empDesignation || "Other Cloud Service"}</span>
                     </div>
-                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
-                      <span className="text-stone-500 uppercase font-semibold">Assigned Project</span>
-                      <span className="font-bold text-[#C67C4E]">{empProjectAssignment || "UVANTHU"}</span>
-                    </div>
-                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
-                      <span className="text-stone-500 uppercase font-semibold">Cost Rate</span>
-                      <span className="font-semibold text-stone-300">${Number(empCostRate || 0).toFixed(2)}/hr</span>
-                    </div>
-                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
-                      <span className="text-stone-500 uppercase font-semibold">Availability</span>
-                      <span className="font-semibold text-stone-300">{empAvailability} hrs/wk</span>
-                    </div>
-                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
-                      <span className="text-stone-500 uppercase font-semibold">Total Weekly Cost</span>
-                      <span className="font-bold text-[#C67C4E]">${weeklyCost.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between border-b border-stone-850/60 pb-1.5">
-                      <span className="text-stone-500 uppercase font-semibold">Total Monthly Cost</span>
-                      <span className="font-bold text-stone-300">${monthlyCost.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between pb-1.5">
-                      <span className="text-stone-500 uppercase font-semibold">Total Weekly Billing</span>
-                      <span className="font-bold text-emerald-500">${weeklyRevenue.toFixed(2)}</span>
+                    <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                      <span className="text-stone-500 font-medium">Assigned Project</span>
+                      <span className="font-semibold text-[#C8844A]">{empProjectAssignment || "UVANTHU"}</span>
                     </div>
                     
-                    {/* Skills Mapped (Only visible on Step 1 preview) */}
-                    {addFormTab === "basic" && (
-                      <div className="pt-2 border-t border-stone-850/60 space-y-1">
-                        <span className="text-stone-500 uppercase font-semibold block">Skills Mapped ({formSkills.length})</span>
-                        <div className="flex flex-wrap gap-1">
-                          {formSkills.map((sk, i) => (
-                            <span key={i} className="px-2 py-0.5 rounded bg-stone-900 text-stone-350 border border-stone-800 text-[8.5px] font-semibold">
-                              {sk.name}
-                            </span>
-                          ))}
+                    {addFormTab === "basic" ? (
+                      <>
+                        <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                          <span className="text-stone-500 font-medium">Availability</span>
+                          <span className="font-medium text-stone-300">{empAvailability} hrs/wk</span>
                         </div>
-                      </div>
+                        {/* Skills Mapped */}
+                        <div className="pt-2.5 space-y-1.5">
+                          <span className="text-stone-500 font-medium block">Skills Mapped ({formSkills.length})</span>
+                          <div className="flex flex-wrap gap-1">
+                            {formSkills.map((sk, i) => (
+                              <span key={i} className="px-2 py-0.5 rounded-md bg-[#C8844A]/10 text-[#C8844A] border border-[#C8844A]/20 text-[9px] font-medium transition duration-200">
+                              {sk.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                          <span className="text-stone-500 font-medium">Cost Rate</span>
+                          <span className="font-medium text-stone-300">${Number(empCostRate || 0).toFixed(2)}/hr</span>
+                        </div>
+                        <div className="flex justify-between items-center pb-2">
+                          <span className="text-stone-500 font-medium">Availability</span>
+                          <span className="font-medium text-stone-300">{empAvailability} hrs/wk</span>
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>
               </form>
 
               {/* Action buttons (Modal Footer) */}
-              <div className="px-6 py-4 border-t border-stone-850 flex justify-between bg-stone-950/20 text-xs">
+              <div className="px-6 py-3 border-t border-white/5 flex justify-between bg-[#0B0B0B] text-xs">
                 <button 
                   type="button" 
                   onClick={() => setIsAddModalOpen(false)}
-                  className="h-9.5 px-4 rounded-xl border border-stone-800 text-stone-300 font-semibold hover:bg-stone-900 transition cursor-pointer"
+                  className="h-10 px-4.5 rounded-xl border border-white/5 text-stone-300 font-semibold hover:bg-stone-900 transition duration-200 cursor-pointer"
                 >
                   Cancel
                 </button>
-                {addFormTab !== "skills" ? (
+                {addFormTab === "basic" ? (
                   <button 
                     type="button" 
-                    onClick={() => {
-                      if (addFormTab === "basic") setAddFormTab("cost");
-                      else if (addFormTab === "cost") setAddFormTab("skills");
-                    }}
-                    className="h-9.5 px-4 rounded-xl bg-[#C67C4E] text-white font-semibold shadow-sm hover:opacity-90 transition cursor-pointer inline-flex items-center gap-1"
+                    onClick={() => setAddFormTab("cost")}
+                    className="h-10 px-4.5 rounded-xl bg-gradient-to-r from-[#C8844A] to-[#D89A63] hover:from-[#D89A63] hover:to-[#E8AA7C] text-white font-semibold shadow-md active:scale-95 transition-all duration-200 cursor-pointer inline-flex items-center gap-1.5"
                   >
                     Continue <ArrowRight className="size-3.5" />
                   </button>
@@ -2212,9 +2688,9 @@ export default function ResourceModule() {
                       const mockEvent = { preventDefault: () => {} } as any;
                       handleSaveResource(mockEvent);
                     }}
-                    className="h-9.5 px-4 rounded-xl bg-[#C67C4E] text-white font-semibold shadow-sm hover:opacity-90 transition cursor-pointer"
+                    className="h-10 px-4.5 rounded-xl bg-gradient-to-r from-[#C8844A] to-[#D89A63] hover:from-[#D89A63] hover:to-[#E8AA7C] text-white font-semibold shadow-md active:scale-95 transition-all duration-200 cursor-pointer inline-flex items-center gap-1.5"
                   >
-                    Save Resource
+                    {addFormTab === "cost" ? "Continue" : "Save Resource"} {addFormTab === "cost" && <ArrowRight className="size-3.5" />}
                   </button>
                 )}
               </div>
@@ -2366,7 +2842,7 @@ export default function ResourceModule() {
           RESOURCE DETAILS DRAWER PANEL
           ======================================================== */}
       {selectedResource && (
-        <div className="fixed inset-0 z-50 flex items-center justify-end">
+        <div className="fixed inset-0 flex items-center justify-end" style={{ zIndex: 100 }}>
           {/* Backdrop */}
           <div onClick={() => setSelectedResource(null)} className="absolute inset-0 bg-black/60 backdrop-blur-xs" />
 

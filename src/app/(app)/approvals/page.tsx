@@ -6,6 +6,8 @@ import { StatusChip, statusTone } from "@/components/status-chip";
 import { formatCurrency } from "@/lib/mock";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { useAuth, useUser } from "@clerk/nextjs";
+import { useWorkspace } from "@/context/WorkspaceContext";
 
 // ==========================================
 // TYPES
@@ -102,12 +104,38 @@ const STAGE_REQUIRED_ROLES: Record<string, string[]> = {
 };
 
 function Approvals() {
+  const { orgRole } = useAuth();
+  const { user } = useUser();
+  const { projects, approvals, approvalAuditLogs, refreshData } = useWorkspace();
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [activeFilter, setActiveFilter] = useState<"All" | "Mine" | "Awaiting me">("Awaiting me");
   
-  // Simulating the user's role from Clerk
+  // User's role from Clerk
   const [actingRole, setActingRole] = useState<string>("Admin");
+
+  useEffect(() => {
+    if (orgRole) {
+      const roleLower = orgRole.toLowerCase();
+      let detectedRole = "Team Member";
+      if (roleLower.includes("admin")) {
+        detectedRole = "Admin";
+      } else if (roleLower.includes("department_heads")) {
+        detectedRole = "Department Head";
+      } else if (roleLower.includes("finance_team")) {
+        detectedRole = "Finance Team";
+      } else if (roleLower.includes("it_administrators")) {
+        detectedRole = "Admin";
+      } else if (roleLower.includes("project_managers")) {
+        detectedRole = "Project Manager";
+      } else if (roleLower.includes("resource_managers")) {
+        detectedRole = "Resource Manager";
+      } else if (roleLower.includes("team_members") || roleLower.includes("member")) {
+        detectedRole = "Team Member";
+      }
+      setActingRole(detectedRole);
+    }
+  }, [orgRole]);
   
   // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -116,7 +144,7 @@ function Approvals() {
 
   // New Request Form State
   const [reqType, setReqType] = useState<ApprovalRequest['type']>("Change Request");
-  const [reqProject, setReqProject] = useState("Atlas Banking Platform");
+  const [reqProject, setReqProject] = useState("");
   const [reqRequester, setReqRequester] = useState("Yogesh V");
   const [reqAmount, setReqAmount] = useState("");
   const [reqDesc, setReqDesc] = useState("");
@@ -124,61 +152,48 @@ function Approvals() {
   // Comment Form State
   const [commentText, setCommentText] = useState("");
 
-  // Load from Supabase, with local storage fallback
-  useEffect(() => {
-    async function loadApprovals() {
-      try {
-        const { data: dbApprovals, error: appError } = await supabase.from("approvals").select("*");
-        const { data: dbAudits, error: auditError } = await supabase.from("approval_audit_logs").select("*");
-
-        let currentReqs: ApprovalRequest[] = [];
-        let currentAudits: AuditLog[] = [];
-
-        if (appError || auditError || !dbApprovals || dbApprovals.length === 0) {
-          const savedReqs = localStorage.getItem("nexus_approvals");
-          const savedAudits = localStorage.getItem("nexus_approvals_audits");
-          if (savedReqs && savedAudits) {
-            currentReqs = JSON.parse(savedReqs);
-            currentAudits = JSON.parse(savedAudits);
-          } else {
-            currentReqs = INITIAL_REQUESTS;
-            currentAudits = INITIAL_AUDITS;
-            localStorage.setItem("nexus_approvals", JSON.stringify(INITIAL_REQUESTS));
-            localStorage.setItem("nexus_approvals_audits", JSON.stringify(INITIAL_AUDITS));
-          }
-        } else {
-          currentReqs = dbApprovals.map(a => ({
-            id: a.id,
-            type: a.type as ApprovalRequest['type'],
-            project: a.project,
-            requester: a.requester,
-            stage: a.stage as ApprovalRequest['stage'],
-            amount: Number(a.amount),
-            submitted: a.submitted,
-            description: a.description
-          }));
-          currentAudits = (dbAudits || []).map(au => ({
-            who: au.who,
-            what: au.what,
-            target: au.target,
-            when: au.when ? new Date(au.when).toLocaleString() : new Date().toLocaleString()
-          }));
-        }
-
-        setRequests(currentReqs);
-        setAuditLogs(currentAudits);
-      } catch (err) {
-        console.error("Failed to load approvals from Supabase:", err);
-        const savedReqs = localStorage.getItem("nexus_approvals");
-        const savedAudits = localStorage.getItem("nexus_approvals_audits");
-        if (savedReqs && savedAudits) {
-          setRequests(JSON.parse(savedReqs));
-          setAuditLogs(JSON.parse(savedAudits));
-        }
-      }
+  // Get the project manager's full name to compare with project.projectManager
+  const userFullName = user ? [user.firstName, user.lastName].filter(Boolean).join(" ") : "";
+  
+  // Filter projects if they are a Project Manager
+  const PMProjects = React.useMemo(() => {
+    if (!projects) return [];
+    if (actingRole === "Project Manager" && userFullName) {
+      return projects.filter(p => p.projectManager && p.projectManager.toLowerCase() === userFullName.toLowerCase());
     }
-    loadApprovals();
-  }, []);
+    return projects;
+  }, [projects, actingRole, userFullName]);
+
+  // Set default project in the form when PMProjects updates
+  useEffect(() => {
+    if (PMProjects.length > 0 && (!reqProject || !PMProjects.some(p => p.name === reqProject))) {
+      setReqProject(PMProjects[0].name);
+    }
+  }, [PMProjects, reqProject]);
+
+  // Initialize and keep local state in sync with context cache
+  useEffect(() => {
+    if (approvals && approvals.length > 0) {
+      setRequests(approvals);
+    } else {
+      const saved = localStorage.getItem("nexus_approvals");
+      setRequests(saved ? JSON.parse(saved) : INITIAL_REQUESTS);
+    }
+  }, [approvals]);
+
+  useEffect(() => {
+    if (approvalAuditLogs && approvalAuditLogs.length > 0) {
+      setAuditLogs(approvalAuditLogs.map(au => ({
+        who: au.user_name || au.who || "Unknown User",
+        what: au.action || au.what || "performed action",
+        target: au.comment || au.target || "Approval Request",
+        when: au.timestamp || au.when ? new Date(au.timestamp || au.when).toLocaleString() : new Date().toLocaleString()
+      })));
+    } else {
+      const saved = localStorage.getItem("nexus_approvals_audits");
+      setAuditLogs(saved ? JSON.parse(saved) : INITIAL_AUDITS);
+    }
+  }, [approvalAuditLogs]);
 
   const saveState = async (updatedReqs: ApprovalRequest[], updatedAudits: AuditLog[]) => {
     setRequests(updatedReqs);
@@ -186,39 +201,77 @@ function Approvals() {
     localStorage.setItem("nexus_approvals", JSON.stringify(updatedReqs));
     localStorage.setItem("nexus_approvals_audits", JSON.stringify(updatedAudits));
 
-    try {
-      const approvalRows = updatedReqs.map(a => ({
-        id: a.id,
-        type: a.type,
-        project: a.project,
-        requester: a.requester,
-        stage: a.stage,
-        amount: a.amount,
-        submitted: a.submitted,
-        description: a.description
-      }));
-      await supabase.from("approvals").upsert(approvalRows);
+    const syncPromise = (async () => {
+      const approvalRows = updatedReqs.map(a => {
+        let createdAt = new Date().toISOString();
+        if (a.submitted && !a.submitted.includes("now") && !a.submitted.includes("ago") && a.submitted !== "Yesterday") {
+          const parsed = Date.parse(a.submitted);
+          if (!isNaN(parsed)) {
+            createdAt = new Date(parsed).toISOString();
+          }
+        }
+        return {
+          id: a.id,
+          title: a.type,
+          project_name: a.project,
+          project_id: null,
+          requester: a.requester,
+          approver: null,
+          status: a.stage,
+          type: a.type,
+          amount: a.amount,
+          details: a.description,
+          created_at: createdAt
+        };
+      });
+      const { error: appError } = await supabase.from("approvals").upsert(approvalRows);
+      if (appError) throw appError;
 
-      const auditRows = updatedAudits.map(au => ({
-        who: au.who,
-        what: au.what,
-        target: au.target,
-        when: au.when ? new Date(au.when).toISOString() : new Date().toISOString()
-      }));
+      const auditRows = updatedAudits.map(au => {
+        let timestamp = new Date().toISOString();
+        if (au.when && !isNaN(Date.parse(au.when))) {
+          timestamp = new Date(au.when).toISOString();
+        }
+        return {
+          who: au.who,
+          what: au.what,
+          target: au.target,
+          when: timestamp
+        };
+      });
       
-      await supabase.from("approval_audit_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      const { error: delError } = await supabase.from("approval_audit_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      if (delError) throw delError;
+
       if (auditRows.length > 0) {
-        await supabase.from("approval_audit_logs").insert(auditRows);
+        const { error: insError } = await supabase.from("approval_audit_logs").insert(auditRows);
+        if (insError) throw insError;
       }
-    } catch (err) {
-      console.error("Failed to sync approvals/audits to Supabase:", err);
-    }
+      await refreshData();
+    })();
+
+    toast.promise(syncPromise, {
+      loading: "Processing approval action...",
+      success: "Approval updated and synchronized!",
+      error: (err) => `Database sync failed: ${err.message || String(err)}`
+    });
   };
 
   // Check if current acting role can approve this request at its current stage
   const canRoleApprove = (req: ApprovalRequest) => {
     if (req.stage === "Approved" || req.stage === "Rejected") return false;
-    const requiredRoles = STAGE_REQUIRED_ROLES[req.stage];
+    
+    let requiredRoles = STAGE_REQUIRED_ROLES[req.stage] || [];
+    
+    // Check if the request is raised by a Project Manager
+    const projectObj = projects.find(p => p.name === req.project);
+    const isPMRequest = (projectObj && projectObj.projectManager === req.requester) || req.requester === "Yogesh V";
+    
+    if (req.stage === "Manager Review" && isPMRequest) {
+      // If the project manager raises the request, ONLY IT Admin (Admin) can approve instead of the manager
+      requiredRoles = ["Admin"];
+    }
+    
     return requiredRoles ? requiredRoles.includes(actingRole) : false;
   };
 
@@ -376,19 +429,23 @@ function Approvals() {
         <div className="flex gap-2">
           {/* Active Simulating Role Selector */}
           <div className="flex items-center gap-2 bg-secondary/80 border border-border px-3 rounded-xl h-10">
-            <span className="text-[10px] uppercase font-bold text-muted-foreground">Acting As Role:</span>
-            <select 
-              value={actingRole}
-              onChange={(e) => setActingRole(e.target.value)}
-              className="bg-transparent border-0 text-xs font-semibold text-primary focus:outline-none cursor-pointer"
-            >
-              <option value="Admin">Admin (Full Access)</option>
-              <option value="Team Member">Team Member (Drafts)</option>
-              <option value="Resource Manager">Resource Manager</option>
-              <option value="Project Manager">Project Manager</option>
-              <option value="Finance Team">Finance Team</option>
-              <option value="Department Head">Department Head</option>
-            </select>
+            <span className="text-[10px] uppercase font-bold text-muted-foreground">Role:</span>
+            {orgRole ? (
+              <span className="text-xs font-bold text-primary px-1">{actingRole}</span>
+            ) : (
+              <select 
+                value={actingRole}
+                onChange={(e) => setActingRole(e.target.value)}
+                className="bg-transparent border-0 text-xs font-semibold text-primary focus:outline-none cursor-pointer"
+              >
+                <option value="Admin">Admin (Full Access)</option>
+                <option value="Team Member">Team Member (Drafts)</option>
+                <option value="Resource Manager">Resource Manager</option>
+                <option value="Project Manager">Project Manager</option>
+                <option value="Finance Team">Finance Team</option>
+                <option value="Department Head">Department Head</option>
+              </select>
+            )}
           </div>
 
           <button 
@@ -630,10 +687,14 @@ function Approvals() {
                   onChange={(e) => setReqProject(e.target.value)}
                   className="w-full h-9 px-2 border border-border rounded-xl bg-secondary/50"
                 >
-                  <option value="Atlas Banking Platform">Atlas Banking Platform</option>
-                  <option value="Helix CRM Migration">Helix CRM Migration</option>
-                  <option value="Nimbus Data Lake">Nimbus Data Lake</option>
-                  <option value="Mosaic Mobile Suite">Mosaic Mobile Suite</option>
+                  {PMProjects.map(proj => (
+                    <option key={proj.id} value={proj.name}>
+                      {proj.name}
+                    </option>
+                  ))}
+                  {PMProjects.length === 0 && (
+                    <option value="" disabled>No projects assigned</option>
+                  )}
                 </select>
               </div>
 

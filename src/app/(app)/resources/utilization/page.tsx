@@ -7,6 +7,8 @@ import { Activity, Clock, TrendingUp, Briefcase } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 
+import { useWorkspace } from "@/context/WorkspaceContext";
+
 // ==========================================
 // TYPES
 // ==========================================
@@ -43,54 +45,40 @@ export interface Resource {
 const tooltipStyle = { background: "white", border: "1px solid #E7E5E4", borderRadius: 12, padding: "8px 12px", fontSize: 12 };
 
 function Utilization() {
+  const { resources: dbResources } = useWorkspace();
   const [resources, setResources] = useState<Resource[]>([]);
   const [filterDept, setFilterDept] = useState("All");
   const [filterProject, setFilterProject] = useState("All");
 
-  // Load state from Supabase, with local storage fallback
+  // Load state from Workspace Context, with local storage fallback
   useEffect(() => {
-    async function loadResources() {
-      try {
-        const { data, error } = await supabase.from("resources").select("*");
-        if (error || !data || data.length === 0) {
-          const saved = localStorage.getItem("nexus_resources_v2");
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed)) {
-              setResources(parsed.filter((r: any) => r.resourceName !== "Human"));
-            }
-          }
-        } else {
-          const mapped: Resource[] = data.map(r => {
-            const rawSkills = typeof r.skills === "string" ? JSON.parse(r.skills) : (r.skills || []);
-            const resourceSkill = Array.isArray(rawSkills) ? rawSkills.find((s: any) => s?.name?.startsWith("Resource: ")) : null;
-            return {
-              id: r.id,
-              name: r.name,
-              email: r.email,
-              role: r.role,
-              dept: r.dept,
-              util: Number(r.utilization_rate),
-              resourceName: resourceSkill ? resourceSkill.name.replace("Resource: ", "") : "Human",
-              allocations: typeof r.allocations === "string" ? JSON.parse(r.allocations) : (r.allocations || []),
-              timesheets: typeof r.timesheets === "string" ? JSON.parse(r.timesheets) : (r.timesheets || [])
-            };
-          }).filter(r => r.resourceName !== "Human");
-          setResources(mapped);
-        }
-      } catch (err) {
-        console.error("Failed to load resources from Supabase:", err);
-        const saved = localStorage.getItem("nexus_resources_v2");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) {
-            setResources(parsed.filter((r: any) => r.resourceName !== "Human"));
-          }
+    if (dbResources && dbResources.length > 0) {
+      const mapped: Resource[] = dbResources.map(r => {
+        const rawSkills = typeof r.skills === "string" ? JSON.parse(r.skills) : (r.skills || []);
+        const resourceSkill = Array.isArray(rawSkills) ? rawSkills.find((s: any) => s?.name?.startsWith("Resource: ")) : null;
+        return {
+          id: r.id,
+          name: r.name,
+          email: r.email,
+          role: r.role,
+          dept: r.dept,
+          util: Number(r.utilization_rate || r.util || 0),
+          resourceName: resourceSkill ? resourceSkill.name.replace("Resource: ", "") : "Human",
+          allocations: typeof r.allocations === "string" ? JSON.parse(r.allocations) : (r.allocations || []),
+          timesheets: typeof r.timesheets === "string" ? JSON.parse(r.timesheets) : (r.timesheets || [])
+        };
+      }).filter(r => r.resourceName !== "Human");
+      setResources(mapped);
+    } else {
+      const saved = localStorage.getItem("nexus_resources_v2");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setResources(parsed.filter((r: any) => r.resourceName !== "Human"));
         }
       }
     }
-    loadResources();
-  }, []);
+  }, [dbResources]);
 
   // Project List for filter
   const projectList = Array.from(new Set(
