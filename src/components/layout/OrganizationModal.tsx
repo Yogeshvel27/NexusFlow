@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useOrganization, useUser } from "@clerk/nextjs";
+import { toast } from "sonner";
 import {
   X, Search, Users, Settings, Mail, ChevronDown,
   MoreHorizontal, Check, Shield, UserCheck, DollarSign,
@@ -67,17 +68,30 @@ export function OrganizationModal({ open, onClose }: Props) {
     } else {
       supabase.from("resources").select("*").then(({ data, error }) => {
         if (data && !error) {
-          const mapped = data.map(r => ({
-            id: r.id,
-            role: r.role || "org:member",
-            publicUserData: {
-              userId: r.id,
-              firstName: r.name.split(" ")[0] || "",
-              lastName: r.name.split(" ").slice(1).join(" ") || "",
-              identifier: r.email,
-              imageUrl: null
-            }
-          }));
+          const isHumanResource = (res: any) => {
+            if (!res || !res.name) return false;
+            const nameLower = res.name.toLowerCase();
+            const nonHumanKeywords = [
+              "aws", "gpt", "claude", "postgresql", "mongodb", "redis", "s3", "azure", 
+              "kubernetes", "aks", "storage", "database", "balancer", "cluster", "bucket", 
+              "instance", "api", "machine"
+            ];
+            return !nonHumanKeywords.some(keyword => nameLower.includes(keyword));
+          };
+
+          const mapped = data
+            .filter(isHumanResource)
+            .map(r => ({
+              id: r.id,
+              role: r.role || "org:member",
+              publicUserData: {
+                userId: r.id,
+                firstName: r.name.split(" ")[0] || "",
+                lastName: r.name.split(" ").slice(1).join(" ") || "",
+                identifier: r.email,
+                imageUrl: null
+              }
+            }));
           setDbMembers(mapped);
         }
       });
@@ -286,307 +300,421 @@ export function OrganizationModal({ open, onClose }: Props) {
               </div>
 
               {/* MAIN CONTENT */}
-              <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 pt-5 pb-3 shrink-0">
-                  <h2 className="text-base font-bold text-white">Members</h2>
-                  <button
-                    onClick={onClose}
-                    className="size-7 grid place-items-center rounded-lg transition-colors"
-                    style={{ color: S.muted }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-
-                {/* Tabs */}
-                <div
-                  className="flex px-6 shrink-0"
-                  style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
-                >
-                  {(["members", "invitations"] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => setTab(t)}
-                      className="flex items-center gap-1.5 px-1 pb-2.5 mr-5 text-sm font-medium capitalize"
-                      style={{
-                        color: tab === t ? S.gold : S.muted,
-                        borderBottom: tab === t ? `2px solid ${S.primary}` : "2px solid transparent",
-                      }}
-                    >
-                      {t === "members" ? "Members" : "Invitations"}
-                      <span
-                        className="text-xs px-1.5 py-0.5 rounded-full"
-                        style={{
-                          background: tab === t ? "rgba(198,124,78,0.2)" : "rgba(255,255,255,0.06)",
-                          color: tab === t ? S.gold : S.muted,
-                        }}
-                      >
-                        {t === "members" ? dbMembers.length : invitations.length}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Search row */}
-                <div className="flex items-center gap-2.5 px-6 pt-3 pb-2 shrink-0">
-                  <div className="flex-1 relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5" style={{ color: S.muted }} />
-                    <input
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Search members"
-                      className="w-full h-9 pl-8 pr-4 rounded-lg text-sm outline-none"
-                      style={{ background: S.input, border: "1px solid rgba(255,255,255,0.10)", color: S.text }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = S.primary)}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)")}
-                    />
-                  </div>
-                  <button
-                    className="h-9 px-4 rounded-lg text-sm font-semibold shrink-0"
-                    style={{ background: "transparent", border: "1px solid rgba(198,124,78,0.5)", color: S.gold }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(198,124,78,0.1)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                  >
-                    Invite
-                  </button>
-                </div>
-
-                {/* Invite form — single row */}
-                {tab === "members" && (
-                  <div className="px-6 pb-3 shrink-0">
-                    <div className="text-xs font-semibold text-white mb-1">Invite new members</div>
-                    <div className="text-xs mb-2" style={{ color: S.muted }}>
-                      Enter or paste one or more email addresses, separated by spaces or commas.
+              {nav === "general" ? (
+                <div className="flex-1 flex flex-col min-w-0 overflow-hidden p-6">
+                  {/* Header */}
+                  <div className="flex items-center justify-between pb-6 shrink-0">
+                    <div>
+                      <h2 className="text-xl font-bold text-white">General Settings</h2>
+                      <p className="text-xs mt-1" style={{ color: S.sub }}>Update your organization profile details.</p>
                     </div>
-                    <div className="flex gap-2 items-center">
-                      <div className="flex-1 relative">
-                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5" style={{ color: S.muted }} />
-                        <input
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          onKeyDown={(e) => e.key === "Enter" && invite()}
-                          placeholder="Enter email addresses"
-                          className="w-full h-9 pl-8 pr-8 rounded-lg text-sm outline-none"
-                          style={{ background: S.input, border: "1px solid rgba(255,255,255,0.10)", color: S.text }}
-                          onFocus={(e) => (e.currentTarget.style.borderColor = S.primary)}
-                          onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)")}
-                        />
-                        {email && (
-                          <button
-                            onClick={() => setEmail("")}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2"
-                            style={{ color: S.muted }}
-                          >
-                            <X className="size-3" />
-                          </button>
-                        )}
+                    <button
+                      onClick={onClose}
+                      className="size-7 grid place-items-center rounded-lg transition-colors text-stone-500 hover:text-white"
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto space-y-6">
+                    {/* Organization Details Card */}
+                    <div
+                      className="rounded-xl border p-5 space-y-4"
+                      style={{ background: S.sidebar, borderColor: S.border }}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div
+                          className="size-16 rounded-xl flex items-center justify-center font-bold text-2xl border-2 border-[#C67C4E] relative overflow-hidden shrink-0"
+                          style={{ boxShadow: "0 0 15px rgba(198, 124, 78, 0.2)" }}
+                        >
+                          {organization?.imageUrl ? (
+                            <img src={organization.imageUrl} className="size-full object-cover" alt="" />
+                          ) : (
+                            <div className="size-full bg-gradient-to-br from-[#C67C4E] to-[#D4A373] text-white flex items-center justify-center">
+                              {organization?.name?.slice(0, 2).toUpperCase() || "OR"}
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-white">{organization?.name}</h3>
+                          <p className="text-xs text-stone-500">ID: {organization?.id}</p>
+                        </div>
                       </div>
 
-                      <button
-                        ref={roleTriggerRef}
-                        onClick={openRoleDropdown}
-                        className="flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium shrink-0"
-                        style={{ background: S.input, border: "1px solid rgba(255,255,255,0.12)", color: S.text, minWidth: 160 }}
-                      >
-                        <SelectedIcon className="size-3.5 shrink-0" style={{ color: S.primary }} />
-                        <span className="flex-1 text-left truncate">{selectedRole.label}</span>
-                        <ChevronDown className="size-3.5 shrink-0" style={{ color: S.muted }} />
-                      </button>
+                      {/* Info grid */}
+                      <div className="grid grid-cols-2 gap-4 pt-2 border-t border-white/5">
+                        <div>
+                          <div className="text-[10px] uppercase font-bold text-stone-500">Created At</div>
+                          <div className="text-sm font-semibold text-white mt-0.5">{fmtDate(organization?.createdAt)}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] uppercase font-bold text-stone-500">Members Count</div>
+                          <div className="text-sm font-semibold text-white mt-0.5">{dbMembers.length} Members</div>
+                        </div>
+                      </div>
+                    </div>
 
-                      <button
-                        onClick={() => { setEmail(""); setErr(""); }}
-                        className="h-9 px-3 rounded-lg text-sm font-medium shrink-0"
-                        style={{ background: "rgba(255,255,255,0.06)", color: S.sub, border: "1px solid rgba(255,255,255,0.08)" }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.10)")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.06)")}
+                    {/* Rename form */}
+                    {isAdmin && (
+                      <div
+                        className="rounded-xl border p-5 space-y-4"
+                        style={{ background: S.sidebar, borderColor: S.border }}
                       >
-                        Cancel
-                      </button>
+                        <h3 className="text-sm font-bold text-white">Rename Organization</h3>
+                        <form
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (!organization) return;
+                            const fd = new FormData(e.currentTarget);
+                            const newName = fd.get("orgName") as string;
+                            if (!newName?.trim()) return;
+                            
+                            const btn = e.currentTarget.querySelector("button") as HTMLButtonElement;
+                            if (btn) btn.disabled = true;
+                            
+                            try {
+                              await organization.update({ name: newName.trim() });
+                              toast.success("Organization renamed successfully!");
+                            } catch (err: any) {
+                              toast.error(err.message || "Failed to rename organization.");
+                            } finally {
+                              if (btn) btn.disabled = false;
+                            }
+                          }}
+                          className="flex items-end gap-3"
+                        >
+                          <div className="flex-1 space-y-2">
+                            <label className="text-[11px] font-semibold text-stone-400">Organization Name</label>
+                            <input
+                              name="orgName"
+                              defaultValue={organization?.name || ""}
+                              required
+                              className="w-full h-9 px-3 rounded-lg text-sm outline-none"
+                              style={{ background: S.input, border: "1px solid rgba(255,255,255,0.1)", color: S.text }}
+                              onFocus={(e) => (e.currentTarget.style.borderColor = S.primary)}
+                              onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)")}
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            className="h-9 px-4 rounded-lg text-xs font-semibold shrink-0"
+                            style={{
+                              background: `linear-gradient(135deg,${S.gold},${S.primary})`,
+                              color: "#fff",
+                            }}
+                          >
+                            Save Name
+                          </button>
+                        </form>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-6 pt-5 pb-3 shrink-0">
+                    <h2 className="text-base font-bold text-white">Members</h2>
+                    <button
+                      onClick={onClose}
+                      className="size-7 grid place-items-center rounded-lg transition-colors"
+                      style={{ color: S.muted }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
 
+                  {/* Tabs */}
+                  <div
+                    className="flex px-6 shrink-0"
+                    style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
+                  >
+                    {(["members", "invitations"] as const).map((t) => (
                       <button
-                        onClick={invite}
-                        disabled={!email.trim() || sending}
-                        className="h-9 px-4 rounded-lg text-sm font-semibold shrink-0 disabled:opacity-50"
+                        key={t}
+                        onClick={() => setTab(t)}
+                        className="flex items-center gap-1.5 px-1 pb-2.5 mr-5 text-sm font-medium capitalize"
                         style={{
-                          background: `linear-gradient(135deg,${S.gold},${S.primary})`,
-                          color: "#fff",
-                          boxShadow: "0 3px 10px rgba(198,124,78,0.30)",
+                          color: tab === t ? S.gold : S.muted,
+                          borderBottom: tab === t ? `2px solid ${S.primary}` : "2px solid transparent",
                         }}
                       >
-                        {sending ? "Sending…" : "Send invitation"}
+                        {t === "members" ? "Members" : "Invitations"}
+                        <span
+                          className="text-xs px-1.5 py-0.5 rounded-full"
+                          style={{
+                            background: tab === t ? "rgba(198,124,78,0.2)" : "rgba(255,255,255,0.06)",
+                            color: tab === t ? S.gold : S.muted,
+                          }}
+                        >
+                          {t === "members" ? dbMembers.length : invitations.length}
+                        </span>
                       </button>
-                    </div>
-                    {err && <div className="text-xs text-red-400 mt-1">{err}</div>}
+                    ))}
                   </div>
-                )}
 
-                {/* Table area */}
-                <div className="flex-1 overflow-y-auto px-6 min-h-0">
+                  {/* Search row */}
+                  <div className="flex items-center gap-2.5 px-6 pt-3 pb-2 shrink-0">
+                    <div className="flex-1 relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5" style={{ color: S.muted }} />
+                      <input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search members"
+                        className="w-full h-9 pl-8 pr-4 rounded-lg text-sm outline-none"
+                        style={{ background: S.input, border: "1px solid rgba(255,255,255,0.10)", color: S.text }}
+                        onFocus={(e) => (e.currentTarget.style.borderColor = S.primary)}
+                        onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)")}
+                      />
+                    </div>
+                    <button
+                      className="h-9 px-4 rounded-lg text-sm font-semibold shrink-0"
+                      style={{ background: "transparent", border: "1px solid rgba(198,124,78,0.5)", color: S.gold }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(198,124,78,0.1)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                      Invite
+                    </button>
+                  </div>
+
+                  {/* Invite form — single row */}
                   {tab === "members" && (
-                    <table className="w-full text-sm">
-                      <thead className="sticky top-0" style={{ background: S.bg }}>
-                        <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                          {["User", "Joined", "Role", "Actions"].map((h) => (
-                            <th key={h} className="text-left py-2 font-semibold text-xs uppercase tracking-wide" style={{ color: S.muted }}>
-                              {h}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {members.length === 0 ? (
-                          <tr>
-                            <td colSpan={4} className="py-6 text-center text-sm" style={{ color: S.muted }}>No members found.</td>
-                          </tr>
-                        ) : (
-                          members.map((m: any) => {
-                            const isMe = m.publicUserData?.userId === user?.id;
-                            const name = [m.publicUserData?.firstName, m.publicUserData?.lastName].filter(Boolean).join(" ") || m.publicUserData?.identifier || "Unknown";
-                            const eml = m.publicUserData?.identifier ?? "";
-                            const avatar = m.publicUserData?.imageUrl;
-                            return (
-                              <tr key={m.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                                <td className="py-2.5 pr-4">
-                                  <div className="flex items-center gap-2.5">
-                                    {avatar ? (
-                                      <img src={avatar} className="size-8 rounded-full object-cover ring-2 ring-[#C67C4E]/20" alt="" />
-                                    ) : (
-                                      <div className="size-8 rounded-full flex items-center justify-center font-bold text-xs" style={{ background: "rgba(198,124,78,0.2)", color: S.primary }}>
-                                        {name.slice(0, 2).toUpperCase()}
-                                      </div>
-                                    )}
-                                    <div>
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="font-medium text-white text-xs">{name}</span>
-                                        {isMe && (
-                                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "rgba(198,124,78,0.15)", color: S.gold, border: "1px solid rgba(198,124,78,0.25)" }}>
-                                            You
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="text-[11px]" style={{ color: S.muted }}>{eml}</div>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="py-2.5 pr-4 text-xs" style={{ color: S.sub }}>{fmtDate(m.createdAt)}</td>
-                                <td className="py-2.5 pr-4">
-                                  {isAdmin ? (
-                                    <div className="relative inline-block">
-                                      <button
-                                        onClick={() => setMRoleOpen(mRoleOpen === m.id ? null : m.id)}
-                                        className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium"
-                                        style={{ background: "rgba(255,255,255,0.06)", color: S.text, border: "1px solid rgba(255,255,255,0.08)" }}
-                                      >
-                                        {roleLabel(m.role)}
-                                        <ChevronDown className="size-3" style={{ color: S.muted }} />
-                                      </button>
-                                      {mRoleOpen === m.id && !isMe && (
-                                        <div className="absolute left-0 top-9 z-50 rounded-lg overflow-hidden shadow-2xl py-1" style={{ background: S.input, border: "1px solid rgba(198,124,78,0.2)", minWidth: 170 }}>
-                                          {ROLES.map((r) => (
-                                            <button
-                                              key={r.key}
-                                              onClick={() => updateRole(m.publicUserData?.userId!, r.key)}
-                                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left"
-                                              style={{ color: m.role === r.key ? S.gold : S.text }}
-                                              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(198,124,78,0.12)")}
-                                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                                            >
-                                              {r.label}
-                                              {m.role === r.key && <Check className="size-3 ml-auto" style={{ color: S.primary }} />}
-                                            </button>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <span className="text-xs font-medium" style={{ color: S.sub }}>
-                                      {roleLabel(m.role)}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="py-2.5">
-                                  {!isMe && isAdmin && (
-                                    <div className="relative inline-block">
-                                      <button
-                                        onClick={() => setActOpen(actOpen === m.id ? null : m.id)}
-                                        className="size-6 grid place-items-center rounded-md transition-colors"
-                                        style={{ color: S.muted }}
-                                        onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
-                                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                                      >
-                                        <MoreHorizontal className="size-3.5" />
-                                      </button>
-                                      {actOpen === m.id && (
-                                        <div className="absolute right-0 top-8 z-50 rounded-lg overflow-hidden shadow-2xl py-1" style={{ background: S.input, border: "1px solid rgba(255,255,255,0.1)", minWidth: 150 }}>
-                                          <button
-                                            onClick={() => removeMember(m.publicUserData?.userId!)}
-                                            className="w-full px-3 py-1.5 text-xs text-left text-red-400"
-                                            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.1)")}
-                                            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                                          >
-                                            Remove member
-                                          </button>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
+                    <div className="px-6 pb-3 shrink-0">
+                      <div className="text-xs font-semibold text-white mb-1">Invite new members</div>
+                      <div className="text-xs mb-2" style={{ color: S.muted }}>
+                        Enter or paste one or more email addresses, separated by spaces or commas.
+                      </div>
+                      <div className="flex gap-2 items-center">
+                        <div className="flex-1 relative">
+                          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5" style={{ color: S.muted }} />
+                          <input
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && invite()}
+                            placeholder="Enter email addresses"
+                            className="w-full h-9 pl-8 pr-8 rounded-lg text-sm outline-none"
+                            style={{ background: S.input, border: "1px solid rgba(255,255,255,0.10)", color: S.text }}
+                            onFocus={(e) => (e.currentTarget.style.borderColor = S.primary)}
+                            onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)")}
+                          />
+                          {email && (
+                            <button
+                              onClick={() => setEmail("")}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2"
+                              style={{ color: S.muted }}
+                            >
+                              <X className="size-3" />
+                            </button>
+                          )}
+                        </div>
+
+                        <button
+                          ref={roleTriggerRef}
+                          onClick={openRoleDropdown}
+                          className="flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium shrink-0"
+                          style={{ background: S.input, border: "1px solid rgba(255,255,255,0.12)", color: S.text, minWidth: 160 }}
+                        >
+                          <SelectedIcon className="size-3.5 shrink-0" style={{ color: S.primary }} />
+                          <span className="flex-1 text-left truncate">{selectedRole.label}</span>
+                          <ChevronDown className="size-3.5 shrink-0" style={{ color: S.muted }} />
+                        </button>
+
+                        <button
+                          onClick={() => { setEmail(""); setErr(""); }}
+                          className="h-9 px-3 rounded-lg text-sm font-medium shrink-0"
+                          style={{ background: "rgba(255,255,255,0.06)", color: S.sub, border: "1px solid rgba(255,255,255,0.08)" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.10)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.06)")}
+                        >
+                          Cancel
+                        </button>
+
+                        <button
+                          onClick={invite}
+                          disabled={!email.trim() || sending}
+                          className="h-9 px-4 rounded-lg text-sm font-semibold shrink-0 disabled:opacity-50"
+                          style={{
+                            background: `linear-gradient(135deg,${S.gold},${S.primary})`,
+                            color: "#fff",
+                            boxShadow: "0 3px 10px rgba(198,124,78,0.30)",
+                          }}
+                        >
+                          {sending ? "Sending…" : "Send invitation"}
+                        </button>
+                      </div>
+                      {err && <div className="text-xs text-red-400 mt-1">{err}</div>}
+                    </div>
                   )}
 
-                  {tab === "invitations" && (
-                    invitations.length === 0 ? (
-                      <div className="py-10 text-center text-sm" style={{ color: S.muted }}>No invitations to display</div>
-                    ) : (
+                  {/* Table area */}
+                  <div className="flex-1 overflow-y-auto px-6 min-h-0">
+                    {tab === "members" && (
                       <table className="w-full text-sm">
                         <thead className="sticky top-0" style={{ background: S.bg }}>
                           <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                            {["Email", "Role", "Actions"].map((h) => (
-                              <th key={h} className="text-left py-2 font-semibold text-xs uppercase tracking-wide" style={{ color: S.muted }}>{h}</th>
+                            {["User", "Joined", "Role", "Actions"].map((h) => (
+                              <th key={h} className="text-left py-2 font-semibold text-xs uppercase tracking-wide" style={{ color: S.muted }}>
+                                {h}
+                              </th>
                             ))}
                           </tr>
                         </thead>
                         <tbody>
-                          {invitations.map((inv) => (
-                            <tr key={inv.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                              <td className="py-2.5 pr-4 text-xs text-white">{inv.emailAddress}</td>
-                              <td className="py-2.5 pr-4 text-xs" style={{ color: S.sub }}>{roleLabel(inv.role)}</td>
-                              <td className="py-2.5">
-                                <button
-                                  onClick={() => revokeInv(inv.id)}
-                                  className="text-xs px-2.5 py-1 rounded-md"
-                                  style={{ color: "#ef4444", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.15)" }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.15)")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.08)")}
-                                >
-                                  Revoke
-                                </button>
-                              </td>
+                          {members.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="py-6 text-center text-sm" style={{ color: S.muted }}>No members found.</td>
                             </tr>
-                          ))}
+                          ) : (
+                            members.map((m: any) => {
+                              const isMe = m.publicUserData?.userId === user?.id;
+                              const name = [m.publicUserData?.firstName, m.publicUserData?.lastName].filter(Boolean).join(" ") || m.publicUserData?.identifier || "Unknown";
+                              const eml = m.publicUserData?.identifier ?? "";
+                              const avatar = m.publicUserData?.imageUrl;
+                              return (
+                                <tr key={m.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                                  <td className="py-2.5 pr-4">
+                                    <div className="flex items-center gap-2.5">
+                                      {avatar ? (
+                                        <img src={avatar} className="size-8 rounded-full object-cover ring-2 ring-[#C67C4E]/20" alt="" />
+                                      ) : (
+                                        <div className="size-8 rounded-full flex items-center justify-center font-bold text-xs" style={{ background: "rgba(198,124,78,0.2)", color: S.primary }}>
+                                          {name.slice(0, 2).toUpperCase()}
+                                        </div>
+                                      )}
+                                      <div>
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="font-medium text-white text-xs">{name}</span>
+                                          {isMe && (
+                                            <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "rgba(198,124,78,0.15)", color: S.gold, border: "1px solid rgba(198,124,78,0.25)" }}>
+                                              You
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="text-[11px]" style={{ color: S.muted }}>{eml}</div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="py-2.5 pr-4 text-xs" style={{ color: S.sub }}>{fmtDate(m.createdAt)}</td>
+                                  <td className="py-2.5 pr-4">
+                                    {isAdmin ? (
+                                      <div className="relative inline-block">
+                                        <button
+                                          onClick={() => setMRoleOpen(mRoleOpen === m.id ? null : m.id)}
+                                          className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium"
+                                          style={{ background: "rgba(255,255,255,0.06)", color: S.text, border: "1px solid rgba(255,255,255,0.08)" }}
+                                        >
+                                          {roleLabel(m.role)}
+                                          <ChevronDown className="size-3" style={{ color: S.muted }} />
+                                        </button>
+                                        {mRoleOpen === m.id && !isMe && (
+                                          <div className="absolute left-0 top-9 z-50 rounded-lg overflow-hidden shadow-2xl py-1" style={{ background: S.input, border: "1px solid rgba(198,124,78,0.2)", minWidth: 170 }}>
+                                            {ROLES.map((r) => (
+                                              <button
+                                                key={r.key}
+                                                onClick={() => updateRole(m.publicUserData?.userId!, r.key)}
+                                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left"
+                                                style={{ color: m.role === r.key ? S.gold : S.text }}
+                                                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(198,124,78,0.12)")}
+                                                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                                              >
+                                                {r.label}
+                                                {m.role === r.key && <Check className="size-3 ml-auto" style={{ color: S.primary }} />}
+                                              </button>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs font-medium" style={{ color: S.sub }}>
+                                        {roleLabel(m.role)}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-2.5">
+                                    {!isMe && isAdmin && (
+                                      <div className="relative inline-block">
+                                        <button
+                                          onClick={() => setActOpen(actOpen === m.id ? null : m.id)}
+                                          className="size-6 grid place-items-center rounded-md transition-colors"
+                                          style={{ color: S.muted }}
+                                          onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
+                                          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                                        >
+                                          <MoreHorizontal className="size-3.5" />
+                                        </button>
+                                        {actOpen === m.id && (
+                                          <div className="absolute right-0 top-8 z-50 rounded-lg overflow-hidden shadow-2xl py-1" style={{ background: S.input, border: "1px solid rgba(255,255,255,0.1)", minWidth: 150 }}>
+                                            <button
+                                              onClick={() => removeMember(m.publicUserData?.userId!)}
+                                              className="w-full px-3 py-1.5 text-xs text-left text-red-400"
+                                              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.1)")}
+                                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                                            >
+                                              Remove member
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
                         </tbody>
                       </table>
-                    )
-                  )}
-                </div>
+                    )}
 
-                {/* Footer */}
-                <div
-                  className="shrink-0 px-6 py-3 flex items-center gap-2"
-                  style={{ borderTop: "1px solid rgba(255,255,255,0.06)", color: S.muted }}
-                >
-                  <Users className="size-3.5" />
-                  <span className="text-xs">{dbMembers.length} of 5 seats used</span>
+                    {tab === "invitations" && (
+                      invitations.length === 0 ? (
+                        <div className="py-10 text-center text-sm" style={{ color: S.muted }}>No invitations to display</div>
+                      ) : (
+                        <table className="w-full text-sm">
+                          <thead className="sticky top-0" style={{ background: S.bg }}>
+                            <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                              {["Email", "Role", "Actions"].map((h) => (
+                                <th key={h} className="text-left py-2 font-semibold text-xs uppercase tracking-wide" style={{ color: S.muted }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {invitations.map((inv) => (
+                              <tr key={inv.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                                <td className="py-2.5 pr-4 text-xs text-white">{inv.emailAddress}</td>
+                                <td className="py-2.5 pr-4 text-xs" style={{ color: S.sub }}>{roleLabel(inv.role)}</td>
+                                <td className="py-2.5">
+                                  <button
+                                    onClick={() => revokeInv(inv.id)}
+                                    className="text-xs px-2.5 py-1 rounded-md"
+                                    style={{ color: "#ef4444", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.15)" }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.15)")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.08)")}
+                                  >
+                                    Revoke
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )
+                    )}
+                  </div>
+
+                  {/* Footer */}
+                  <div
+                    className="shrink-0 px-6 py-3 flex items-center gap-2"
+                    style={{ borderTop: "1px solid rgba(255,255,255,0.06)", color: S.muted }}
+                  >
+                    <Users className="size-3.5" />
+                    <span className="text-xs">{dbMembers.length} of 5 seats used</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </>
           ) : (
             <>

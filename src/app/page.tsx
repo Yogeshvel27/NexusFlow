@@ -78,7 +78,8 @@ export default function LoginPage() {
           password: pwd,
         });
         if (error) {
-          toast.error(error.message || "An error occurred during sign up.");
+          const errMsg = (error as any).errors?.[0]?.longMessage || (error as any).errors?.[0]?.message || (error as any).message || "An error occurred during sign up.";
+          toast.error(errMsg);
           return;
         }
 
@@ -91,9 +92,9 @@ export default function LoginPage() {
         setVerificationMode("signup");
         setVerifying(true);
         toast.success("Verification code sent to your email!");
-      } catch (err: unknown) {
+      } catch (err: any) {
         console.error("Sign up error:", err);
-        const message = err instanceof Error ? err.message : "An error occurred during sign up.";
+        const message = err.errors?.[0]?.longMessage || err.errors?.[0]?.message || err.message || "An error occurred during sign up.";
         toast.error(message);
       } finally {
         setPending(false);
@@ -110,7 +111,7 @@ export default function LoginPage() {
           password: pwd,
         });
         if (error) {
-          const errMsg = error.message || "";
+          const errMsg = (error as any).errors?.[0]?.longMessage || (error as any).errors?.[0]?.message || (error as any).message || "";
           if (errMsg.includes("already signed in") || errMsg.includes("session_already_active")) {
             toast.success("Already signed in. Welcome back!");
             router.push("/dashboard");
@@ -151,9 +152,9 @@ export default function LoginPage() {
         } else {
           toast.info("Additional authentication steps are required to complete sign in.");
         }
-      } catch (err: unknown) {
+      } catch (err: any) {
         console.error("Sign in error:", err);
-        const errMsg = err instanceof Error ? err.message : "";
+        const errMsg = err.errors?.[0]?.longMessage || err.errors?.[0]?.message || err.message || "";
         if (errMsg.includes("already signed in") || errMsg.includes("session_already_active")) {
           toast.success("Already signed in. Welcome back!");
           router.push("/dashboard");
